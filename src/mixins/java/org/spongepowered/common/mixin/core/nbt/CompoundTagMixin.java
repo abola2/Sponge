@@ -24,29 +24,20 @@
  */
 package org.spongepowered.common.mixin.core.nbt;
 
+import com.google.common.base.Function;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import org.apache.logging.log4j.Level;
-import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.common.SpongeCommon;
 import org.spongepowered.common.util.PrettyPrinter;
 
 import java.util.Map;
 
-/**
- * @author Zidane - Minecraft 1.14.4
- *
- * Normally this shouldn't be necessary, however, due to unforseen consequences
- * of creating block snapshots, there are corner cases where mod authors are
- * setting nulls into the compound for their tile entities. This overwrite
- * prevents an NPE crashing the game. A pretty warning message will be printed
- * out for the client to see and report to both Sponge and the mod author.
- */
 @Mixin(CompoundTag.class)
 public abstract class CompoundTagMixin {
 
@@ -54,54 +45,39 @@ public abstract class CompoundTagMixin {
     @Shadow @Final private Map<String, Tag> tags;
     // @formatter:on
 
-    @Redirect(method = "copy()Lnet/minecraft/nbt/CompoundTag;", at = @At(value = "INVOKE", target = "Lnet/minecraft/nbt/Tag;copy()Lnet/minecraft/nbt/Tag;"))
-    @Nullable
-    private Tag impl$checkForOverflowOnCopy(Tag inbt) {
-        try {
-            return inbt == null ? null : inbt.copy();
-        } catch (StackOverflowError e) {
-            final PrettyPrinter printer = new PrettyPrinter(60)
-                .add("StackOverflow from trying to copy this compound")
-                .centre()
-                .hr();
-            printer.addWrapped(70, "Sponge caught a stack overflow error, printing out some special"
-                                   + " handling and printouts to assist in finding out where this"
-                                   + " recursion is coming from.");
-            printer.add();
+    @ModifyArg(method = "copy()Lnet/minecraft/nbt/CompoundTag;", at = @At(value = "INVOKE", target = "Lcom/google/common/collect/Maps;transformValues(Ljava/util/Map;Lcom/google/common/base/Function;)Ljava/util/Map;"))
+    private Function<Tag, Tag> impl$checkForOverflowOnCopy(final Function<Tag, Tag> copy) {
+        return (tag) -> {
             try {
-                printer.addWrapped(80, "%s : %s", "This compound", this);
-            } catch (final Throwable error) {
-                printer.addWrapped(80, "Unable to get the string of this compound. Printing out some of the entries to better assist");
+                return copy.apply(tag);
+            } catch (final StackOverflowError e) {
+                final PrettyPrinter printer = new PrettyPrinter(60)
+                    .add("StackOverflow from trying to copy this compound")
+                    .centre()
+                    .hr();
+                printer.addWrapped(70, "Sponge caught a stack overflow error, printing out some special"
+                    + " handling and printouts to assist in finding out where this"
+                    + " recursion is coming from.");
+                printer.add();
+                try {
+                    printer.addWrapped(80, "%s : %s", "This compound", this);
+                } catch (final Throwable error) {
+                    printer.addWrapped(80, "Unable to get the string of this compound. Printing out some of the entries to better assist");
 
-                for (final Map.Entry<String, Tag> entry : this.tags.entrySet()) {
-                    try {
-                        printer.addWrapped(80, "%s : %s", entry.getKey(), entry.getValue());
-                    } catch (final Throwable throwable) {
-                        printer.add();
-                        printer.addWrapped(80, "The offending key entry is belonging to " + entry.getKey());
-                        break;
+                    for (final Map.Entry<String, Tag> entry : this.tags.entrySet()) {
+                        try {
+                            printer.addWrapped(80, "%s : %s", entry.getKey(), entry.getValue());
+                        } catch (final Throwable throwable) {
+                            printer.add();
+                            printer.addWrapped(80, "The offending key entry is belonging to " + entry.getKey());
+                            break;
+                        }
                     }
                 }
+                printer.add();
+                printer.log(SpongeCommon.logger(), Level.ERROR);
+                throw e;
             }
-            printer.add();
-            printer.log(SpongeCommon.logger(), Level.ERROR);
-            return null;
-        }
+        };
     }
-
-    @Redirect(method = "copy()Lnet/minecraft/nbt/CompoundTag;", at = @At(value = "INVOKE", target = "Lnet/minecraft/nbt/CompoundTag;put(Ljava/lang/String;Lnet/minecraft/nbt/Tag;)Lnet/minecraft/nbt/Tag;"))
-    private Tag impl$checkForNullNBTValuesDuringCopy(CompoundTag compound, String key, Tag value) {
-        if (value == null) {
-            final IllegalStateException exception = new IllegalStateException("There is a null NBT component in the compound for key: " + key);
-            SpongeCommon.logger().error("Printing out a stacktrace to catch an exception in performing an NBTTagCompound.copy!\n"
-                                         + "If you are seeing this, then Sponge is preventing an exception from being thrown due to unforseen\n"
-                                         + "possible bugs in any mods present. Please report this to SpongePowered and/or the relative mod\n"
-                                         + "authors for the offending compound data!", exception);
-        } else {
-            compound.put(key, value);
-        }
-
-        return value;
-    }
-
 }

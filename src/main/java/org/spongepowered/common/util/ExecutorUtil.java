@@ -22,13 +22,26 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package org.spongepowered.common.bridge.commands;
+package org.spongepowered.common.util;
 
-import org.spongepowered.common.command.manager.SpongeCommandManager;
+import net.minecraft.Util;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.TimeUtil;
+import org.spongepowered.common.accessor.server.MinecraftServerAccessor;
 
-public interface CommandsBridge {
+import java.util.concurrent.CompletableFuture;
 
-    SpongeCommandManager bridge$commandManager();
+public class ExecutorUtil {
 
-    void bridge$endVanillaRegistration();
+    public static <T> CompletableFuture<T> serverManagedBlock(final MinecraftServer server, final CompletableFuture<T> future) {
+        while (!future.isDone()) {
+            final long timeUp = Util.getNanos() + TimeUtil.NANOSECONDS_PER_MILLISECOND;
+            ((MinecraftServerAccessor) server).accessor$nextTickTimeNanos(timeUp);
+            server.managedBlock(() -> future.isDone() || Util.getNanos() >= timeUp);
+        }
+        return future;
+    }
+
+    private ExecutorUtil() {
+    }
 }

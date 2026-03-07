@@ -367,7 +367,7 @@ public abstract class SpongeEventManager implements EventManager {
         for (final RegisteredListener handler : handlers) {
             try (
                     final CauseStackManager.StackFrame frame = PhaseTracker.getInstance().pushCauseFrame();
-                    final @Nullable PhaseContext<@NonNull ?> context = SpongeEventManager.createListenerContext(handler.getPlugin())
+                    final @Nullable PhaseContext<@NonNull ?> context = SpongeEventManager.createListenerContext(event, handler.getPlugin())
             ) {
                 frame.pushCause(handler.getPlugin());
                 if (context != null) {
@@ -387,9 +387,11 @@ public abstract class SpongeEventManager implements EventManager {
         return event instanceof Cancellable && ((Cancellable) event).isCancelled();
     }
 
-    public static @Nullable EventListenerPhaseContext createListenerContext(@Nullable final PluginContainer plugin) {
+    public static @Nullable EventListenerPhaseContext createListenerContext(final Object event, @Nullable final PluginContainer plugin) {
         if (PhaseTracker.getInstance().getPhaseContext().allowsEventListener()) {
-            final EventListenerPhaseContext context = PluginPhase.Listener.GENERAL_LISTENER.createPhaseContext(PhaseTracker.getInstance());
+            final EventListenerPhaseContext context = PluginPhase.Listener.GENERAL_LISTENER
+                .createPhaseContext(PhaseTracker.getInstance())
+                .event(event);
             if (plugin != null) {
                 context.source(plugin);
             }

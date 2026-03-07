@@ -84,7 +84,8 @@ import org.spongepowered.common.event.tracking.context.transaction.inventory.Dro
 import org.spongepowered.common.event.tracking.context.transaction.inventory.ExplicitInventoryOmittedTransaction;
 import org.spongepowered.common.event.tracking.context.transaction.inventory.InventoryTransaction;
 import org.spongepowered.common.event.tracking.context.transaction.inventory.OpenMenuTransaction;
-import org.spongepowered.common.event.tracking.context.transaction.inventory.PlaceRecipeTransaction;
+import org.spongepowered.common.event.tracking.context.transaction.inventory.PlaceCookingRecipeTransaction;
+import org.spongepowered.common.event.tracking.context.transaction.inventory.PlaceCraftingRecipeTransaction;
 import org.spongepowered.common.event.tracking.context.transaction.inventory.PlayerInventoryTransaction;
 import org.spongepowered.common.event.tracking.context.transaction.inventory.SelectTradeTransaction;
 import org.spongepowered.common.event.tracking.context.transaction.inventory.SetCarriedItemTransaction;
@@ -377,7 +378,13 @@ interface TransactionSink {
     }
 
     default EffectTransactor logPlaceRecipe(final boolean shift, final RecipeHolder<Recipe<?>> recipe, final ServerPlayer player, final CraftingInventory craftInv) {
-        final PlaceRecipeTransaction transaction = new PlaceRecipeTransaction(player, shift, recipe, craftInv);
+        final PlaceCraftingRecipeTransaction transaction = new PlaceCraftingRecipeTransaction(player, shift, recipe, craftInv);
+        this.logTransaction(transaction);
+        return this.pushEffect(new ResultingTransactionBySideEffect(InventoryEffect.getInstance()));
+    }
+
+    default EffectTransactor logPlaceCookingRecipe(final BlockEntity blockEntity, boolean shift, final RecipeHolder<?> recipe, final ServerPlayer player) {
+        final PlaceCookingRecipeTransaction transaction = new PlaceCookingRecipeTransaction(blockEntity, player, shift, recipe);
         this.logTransaction(transaction);
         return this.pushEffect(new ResultingTransactionBySideEffect(InventoryEffect.getInstance()));
     }

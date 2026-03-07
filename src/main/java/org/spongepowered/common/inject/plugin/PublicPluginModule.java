@@ -45,8 +45,6 @@ public final class PublicPluginModule extends AbstractModule {
 
     @Override
     protected void configure() {
-        this.requestStaticInjection(PreserveHelper.class);
-
         final BindingHelper bindingHelper = new BindingHelper(this.binder().withSource(BindingHelper.class));
         for (final PluginDependency dependency : this.container.metadata().dependencies()) {
             if (dependency.loadOrder() != PluginDependency.LoadOrder.AFTER) {
@@ -69,13 +67,5 @@ public final class PublicPluginModule extends AbstractModule {
             .forEach(bindingHelper::bindFrom);
 
         bindingHelper.bind();
-    }
-
-    /**
-     * If no public module has any bindings, Guice will silently promote
-     * the private module as the "main" one which leads to everything
-     * being marked as private, including the plugin provided custom module.
-     */
-    private static final class PreserveHelper {
     }
 }

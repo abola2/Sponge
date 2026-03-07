@@ -30,11 +30,13 @@ import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.event.entity.player.CriticalHitEvent;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.common.util.DamageEventUtil;
+import org.spongepowered.forge.mixin.core.world.entity.LivingEntityMixin_Forge_Attack_Impl;
 
 @Mixin(Player.class)
-public class PlayerMixin_Forge_Attack_Impl {
+public abstract class PlayerMixin_Forge_Attack_Impl extends LivingEntityMixin_Forge_Attack_Impl {
     private DamageEventUtil.Attack<Player> attackImpl$attack;
 
     @Redirect(method = "attack", at = @At(value = "INVOKE", target = "Lnet/minecraftforge/common/ForgeHooks;getCriticalHit(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/Entity;ZF)Lnet/minecraftforge/event/entity/player/CriticalHitEvent;"))
@@ -44,5 +46,13 @@ public class PlayerMixin_Forge_Attack_Impl {
             this.attackImpl$attack.functions().add(DamageEventUtil.provideCriticalAttackFunction(this.attackImpl$attack.sourceEntity(), event.getDamageModifier()));
         }
         return event;
+    }
+
+    @ModifyArg(method = "actuallyHurt", at = @At(value = "INVOKE", target = "Lnet/minecraftforge/common/ForgeHooks;onLivingDamage(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/damagesource/DamageSource;F)F"))
+    private float attackImpl$firePostEvent_Player(final float damage) {
+        if (this.attackImpl$actuallyHurtResult.event().isCancelled()) {
+            return 0;
+        }
+        return this.attackImpl$actuallyHurtFinalDamage;
     }
 }

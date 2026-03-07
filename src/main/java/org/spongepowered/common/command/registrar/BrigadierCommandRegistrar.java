@@ -242,7 +242,12 @@ public final class BrigadierCommandRegistrar implements BrigadierBasedRegistrar<
 
     private LiteralCommandNode<CommandSourceStack> applyNamespace(final PluginContainer pluginContainer,
             final LiteralArgumentBuilder<CommandSourceStack> builder, final boolean isSpongeAware) {
-        if (builder.getLiteral().contains(":") || builder.getLiteral().contains(" ")) {
+        if (!isSpongeAware && builder.getLiteral().contains(":")) {
+            if (builder.getLiteral().contains(" ")) {
+                throw new IllegalArgumentException("The literal must not contain a space.");
+            }
+            return new SpongePermissionWrappedLiteralCommandNode(builder);
+        } else if (isSpongeAware && (builder.getLiteral().contains(":") || builder.getLiteral().contains(" "))) {
             // nope
             throw new IllegalArgumentException("The literal must not contain a colon or a space.");
         }

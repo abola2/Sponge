@@ -24,7 +24,6 @@
  */
 package org.spongepowered.common.mixin.core.server.commands;
 
-import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.commands.TeleportCommand;
 import net.minecraft.server.level.ServerLevel;
@@ -32,11 +31,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.RelativeMovement;
 import net.minecraft.world.level.ChunkPos;
-import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.event.CauseStackManager;
 import org.spongepowered.api.event.EventContextKeys;
@@ -47,7 +43,8 @@ import org.spongepowered.api.event.entity.MoveEntityEvent;
 import org.spongepowered.api.event.entity.RotateEntityEvent;
 import org.spongepowered.api.world.server.ServerWorld;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.common.SpongeCommon;
 import org.spongepowered.common.event.ShouldFire;
 import org.spongepowered.common.event.tracking.PhaseTracker;
@@ -60,25 +57,16 @@ import java.util.Set;
 @Mixin(TeleportCommand.class)
 public abstract class TeleportCommandMixin {
 
-    /**
-     * @author Zidane
-     * @reason Have the teleport command respect our events
-     */
-    @Overwrite
-    private static void performTeleport(CommandSourceStack source, Entity entityIn, ServerLevel worldIn, double x, double y, double z,
-            Set<RelativeMovement> relativeList, float yaw, float pitch, TeleportCommand.@Nullable LookAt facing) {
-
+    @Redirect(method = "performTeleport", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;teleportTo(Lnet/minecraft/server/level/ServerLevel;DDDLjava/util/Set;FF)Z"))
+    private static boolean impl$createCauseFrameForPerformTeleport(
+        final Entity entityIn, final ServerLevel worldIn, final double x, final double y,
+        final double z, final Set<RelativeMovement> relativeList, final float yaw, final float pitch
+    ) {
         double actualX = x;
         double actualY = y;
         double actualZ = z;
         double actualYaw = yaw;
         double actualPitch = pitch;
-
-        if (!(entityIn instanceof ServerPlayer)) {
-            actualYaw = Mth.wrapDegrees(yaw);
-            actualPitch = Mth.wrapDegrees(pitch);
-            actualPitch = Mth.clamp(actualPitch, -90.0F, 90.0F);
-        }
 
         if (worldIn == entityIn.level()) {
             try (final CauseStackManager.StackFrame frame = PhaseTracker.getInstance().pushCauseFrame()) {
@@ -92,7 +80,7 @@ public abstract class TeleportCommandMixin {
                             new Vector3d(x, y, z), new Vector3d(x, y, z));
 
                     if (SpongeCommon.post(posEvent)) {
-                        return;
+                        return false;
                     }
 
                     actualX = posEvent.destinationPosition().x();
@@ -145,7 +133,7 @@ public abstract class TeleportCommandMixin {
                     final ChangeEntityWorldEvent.Pre preEvent = PlatformHooks.INSTANCE.getEventHooks().callChangeEntityWorldEventPre(entityIn,
                             worldIn);
                     if (SpongeCommon.post(preEvent)) {
-                        return;
+                        return false;
                     }
 
                     final ChangeEntityWorldEvent.Reposition posEvent =
@@ -156,13 +144,13 @@ public abstract class TeleportCommandMixin {
                                     new Vector3d(x, y, z), preEvent.destinationWorld());
 
                     if (SpongeCommon.post(posEvent)) {
-                        return;
+                        return false;
                     }
 
                     entityIn.unRide();
                     final Entity result = entityIn.getType().create(worldIn);
                     if (result == null) {
-                        return;
+                        return false;
                     }
 
                     if (ShouldFire.ROTATE_ENTITY_EVENT) {
@@ -198,17 +186,6 @@ public abstract class TeleportCommandMixin {
             }
         }
 
-        if (facing != null) {
-            facing.perform(source, entityIn);
-        }
-
-        if (!(entityIn instanceof LivingEntity) || !((LivingEntity)entityIn).isFallFlying()) {
-            entityIn.setDeltaMovement(entityIn.getDeltaMovement().multiply(1.0D, 0.0D, 1.0D));
-            entityIn.setOnGround(true);
-        }
-
-        if (entityIn instanceof PathfinderMob) {
-            ((PathfinderMob)entityIn).getNavigation().stop();
-        }
+        return true;
     }
 }

@@ -26,7 +26,6 @@ package org.spongepowered.common.event.tracking.context.transaction.inventory;
 
 import net.minecraft.network.protocol.game.ServerboundPlaceRecipePacket;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -48,15 +47,15 @@ import org.spongepowered.common.item.util.ItemStackUtil;
 import java.util.List;
 import java.util.Optional;
 
-public class PlaceRecipeTransaction extends ContainerBasedTransaction {
+public class PlaceCraftingRecipeTransaction extends ContainerBasedTransaction {
 
     private final ServerPlayer player;
     private final ItemStackSnapshot originalCursor;
     private boolean shift;
-    private RecipeHolder<Recipe<?>> recipe;
+    private RecipeHolder<?> recipe;
     private CraftingInventory craftingInventory;
 
-    public PlaceRecipeTransaction(final ServerPlayer player, final boolean shift, final RecipeHolder<Recipe<?>> recipe, CraftingInventory craftingInventory) {
+    public PlaceCraftingRecipeTransaction(final ServerPlayer player, final boolean shift, final RecipeHolder<?> recipe, CraftingInventory craftingInventory) {
         super(player.containerMenu);
         this.player = player;
         this.originalCursor = ItemStackUtil.snapshotOf(player.containerMenu.getCarried());

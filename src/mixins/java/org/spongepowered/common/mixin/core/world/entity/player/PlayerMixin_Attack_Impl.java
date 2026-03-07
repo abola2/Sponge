@@ -29,7 +29,6 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -164,12 +163,11 @@ public abstract class PlayerMixin_Attack_Impl extends LivingEntityMixin_Attack_I
      * Play prevented sound from {@link #attackImpl$preventSprintingAttackSound}
      * returns false if canceled, appearing for vanilla as an invulnerable target. {@link #attackImpl$onNoDamageSound}
      */
-    @Redirect(method = "attack",
+    @WrapOperation(method = "attack",
         slice = @Slice(from = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;getDeltaMovement()Lnet/minecraft/world/phys/Vec3;"),
             to = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;getKnockback(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/damagesource/DamageSource;)F")),
         at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;hurt(Lnet/minecraft/world/damagesource/DamageSource;F)Z"))
-    protected boolean attackImpl$onHurt(final Entity targetEntity, final DamageSource damageSource, final float mcDamage) {
-
+    protected boolean attackImpl$onHurt(final Entity targetEntity, final DamageSource damageSource, final float mcDamage, final Operation<Boolean> original) {
         float knockbackModifier = this.shadow$getKnockback(targetEntity, damageSource) + (this.attackImpl$isStrongSprintAttack ? 1.0F : 0.0F);
         this.attackImpl$attackEvent = DamageEventUtil.callPlayerAttackEntityEvent(this.attackImpl$attack, knockbackModifier);
 
@@ -186,7 +184,7 @@ public abstract class PlayerMixin_Attack_Impl extends LivingEntityMixin_Attack_I
             this.impl$playAttackSound((Player) (Object) this, SoundEvents.PLAYER_ATTACK_KNOCKBACK);
         }
 
-        return targetEntity.hurt(damageSource, (float) this.attackImpl$attackEvent.finalOutputDamage());
+        return original.call(targetEntity, damageSource, (float) this.attackImpl$attackEvent.finalOutputDamage());
     }
 
     /**
@@ -253,26 +251,24 @@ public abstract class PlayerMixin_Attack_Impl extends LivingEntityMixin_Attack_I
     /**
      * Redirect {@link LivingEntity#knockback} to use modified event knockback
      */
-    @Redirect(method = "attack",
+    @WrapOperation(method = "attack",
         slice = @Slice(from = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;getEntitiesOfClass(Ljava/lang/Class;Lnet/minecraft/world/phys/AABB;)Ljava/util/List;"),
             to = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;hurt(Lnet/minecraft/world/damagesource/DamageSource;F)Z")),
         at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;knockback(DDD)V"))
-    protected void attackImpl$modifyKnockback(final LivingEntity instance, final double $$0, final double $$1, final double $$2) {
-        instance.knockback($$0 * this.attackImpl$attackEvent.knockbackModifier(), $$1, $$2);
+    protected void attackImpl$modifyKnockback(final LivingEntity instance, final double strength, final double x, final double z, final Operation<Void> original) {
+        original.call(instance, strength * this.attackImpl$attackEvent.knockbackModifier(), x, z);
     }
 
     /**
      * Captures inventory changes
      */
-    @Redirect(method = "attack",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;setItemInHand(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/ItemStack;)V"))
-    protected void attackImpl$causeInventoryCapture(final Player instance, final InteractionHand interactionHand, final ItemStack stack) {
-        instance.setItemInHand(interactionHand, stack);
-
+    @Inject(method = "attack", at = @At(value = "INVOKE", shift = At.Shift.AFTER,
+        target = "Lnet/minecraft/world/entity/player/Player;setItemInHand(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/ItemStack;)V"))
+    protected void attackImpl$causeInventoryCapture(final CallbackInfo ci) {
         // Capture...
         final PhaseContext<@NonNull ?> context = PhaseTracker.SERVER.getPhaseContext();
         final TransactionalCaptureSupplier transactor = context.getTransactor();
-        transactor.logPlayerInventoryChange(instance, PlayerInventoryTransaction.EventCreator.STANDARD);
+        transactor.logPlayerInventoryChange((Player) (Object) this, PlayerInventoryTransaction.EventCreator.STANDARD);
         this.inventoryMenu.broadcastChanges();
     }
 

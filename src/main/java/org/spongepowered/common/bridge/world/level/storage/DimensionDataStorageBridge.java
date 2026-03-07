@@ -22,18 +22,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package org.spongepowered.common.util;
+package org.spongepowered.common.bridge.world.level.storage;
 
-import java.util.concurrent.CompletableFuture;
+import net.minecraft.resources.ResourceLocation;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class FutureUtil {
+public interface DimensionDataStorageBridge {
 
-    public static <T> CompletableFuture<T> completedWithException(Throwable throwable) {
-        final CompletableFuture<T> future = new CompletableFuture<>();
-        future.completeExceptionally(throwable);
-        return future;
-    }
+    void bridge$dimensionKey(@Nullable ResourceLocation dimensionKey);
 
-    private FutureUtil() {
-    }
+    @Nullable ResourceLocation bridge$dimensionKey();
 }

@@ -25,6 +25,7 @@
 package org.spongepowered.common.mixin.core.server;
 
 import com.google.inject.Injector;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.sugar.Local;
@@ -144,6 +145,7 @@ public abstract class MinecraftServerMixin implements SpongeServer, MinecraftSer
     @Shadow private volatile boolean isSaving;
     @Shadow public abstract ResourceManager shadow$getResourceManager();
     @Shadow @Nullable public abstract ServerLevel shadow$getLevel(ResourceKey<Level> $$0);
+    @Shadow public abstract boolean shadow$isShutdown();
     // @formatter:on
 
     private final ChatDecorator impl$spongeDecorator = new SpongeChatDecorator();
@@ -491,8 +493,8 @@ public abstract class MinecraftServerMixin implements SpongeServer, MinecraftSer
             this.impl$serviceProvider.init();
 
             Util.blockUntilDone(e ->
-                SimpleReloadInstance.create(this.shadow$getResourceManager(), List.of(((ServerFunctionManagerAccessor) this.functionManager).accessor$library()),
-                    Util.backgroundExecutor(), e, CompletableFuture.completedFuture(Unit.INSTANCE), MinecraftServerMixin.LOGGER.isDebugEnabled()).done());
+                SimpleReloadInstance.of(this.shadow$getResourceManager(), List.of(((ServerFunctionManagerAccessor) this.functionManager).accessor$library()),
+                    Util.backgroundExecutor(), e, CompletableFuture.completedFuture(Unit.INSTANCE)).done());
         }
     }
 
@@ -531,5 +533,13 @@ public abstract class MinecraftServerMixin implements SpongeServer, MinecraftSer
         if (this.impl$spongeMainThreadExecutor.pollTask()) {
             cir.setReturnValue(true);
         }
+    }
+
+    @ModifyExpressionValue(method = "scheduleExecutables", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/MinecraftServer;isStopped()Z"))
+    private boolean impl$scheduleExecutablesIsShutdown(final boolean original) {
+        // Vanilla immediately flips this bit when the shutdown starts
+        // and causes all pending I/O operations to be executed in the
+        // async thread instead of the server thread. This is bad.
+        return this.shadow$isShutdown();
     }
 }

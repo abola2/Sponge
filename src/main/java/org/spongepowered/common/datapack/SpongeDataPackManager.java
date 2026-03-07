@@ -46,7 +46,6 @@ import org.spongepowered.common.SpongeCommon;
 import org.spongepowered.common.event.lifecycle.RegisterDataPackValueEventImpl;
 import org.spongepowered.common.item.recipe.ingredient.IngredientResultUtil;
 import org.spongepowered.common.item.recipe.ingredient.SpongeIngredient;
-import org.spongepowered.common.util.FutureUtil;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -187,7 +186,7 @@ public final class SpongeDataPackManager implements DataPackManager {
                 final T deserialized = packSerializer.deserialize(implPack, inputStream, key);
                 return CompletableFuture.completedFuture(Optional.ofNullable(deserialized));
             } catch (final IOException ex) {
-                return FutureUtil.completedWithException(ex);
+                return CompletableFuture.failedFuture(ex);
             }
         }
 
@@ -199,7 +198,7 @@ public final class SpongeDataPackManager implements DataPackManager {
                 final T deserialized = packSerializer.deserialize(implPack, file, key);
                 return CompletableFuture.completedFuture(Optional.ofNullable(deserialized));
             } catch (final IOException ex) {
-                return FutureUtil.completedWithException(ex);
+                return CompletableFuture.failedFuture(ex);
             }
         }
         return CompletableFuture.completedFuture(Optional.empty());

@@ -25,6 +25,11 @@
 package org.spongepowered.common.mixin.tracker.world.level.block;
 
 import com.google.common.collect.ImmutableList;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Share;
+import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.dispenser.BlockSource;
 import net.minecraft.core.dispenser.DispenseItemBehavior;
@@ -33,6 +38,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.DispenserBlock;
 import net.minecraft.world.level.block.entity.DispenserBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.api.event.CauseStackManager;
 import org.spongepowered.api.event.SpongeEventFactory;
 import org.spongepowered.api.event.item.inventory.DropItemEvent;
@@ -40,11 +47,7 @@ import org.spongepowered.api.item.inventory.ItemStackSnapshot;
 import org.spongepowered.api.world.BlockChangeFlags;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.Slice;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
 import org.spongepowered.common.SpongeCommon;
 import org.spongepowered.common.block.SpongeBlockSnapshot;
 import org.spongepowered.common.bridge.world.TrackedWorldBridge;
@@ -56,70 +59,60 @@ import org.spongepowered.common.item.util.ItemStackUtil;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Supplier;
 
 @Mixin(DispenserBlock.class)
 public abstract class DispenserBlockMixin_Tracker {
-    private Supplier<ItemStack> tracker$originalItem = () -> ItemStack.EMPTY;
-    private PhaseContext<?> tracker$context = PhaseContext.empty();
 
-    @Inject(method = "dispenseFrom", at = @At(value = "HEAD"))
-    private void tracker$createContextOnDispensing(final ServerLevel worldIn, final BlockState state, final BlockPos pos, final CallbackInfo ci) {
+    @WrapMethod(method = "dispenseFrom")
+    private void tracker$createContextOnDispensing(final ServerLevel worldIn, final BlockState state, final BlockPos pos, final Operation<Void> original) {
         final SpongeBlockSnapshot spongeBlockSnapshot = ((TrackedWorldBridge) worldIn).bridge$createSnapshot(state, pos, BlockChangeFlags.ALL);
         final LevelChunkBridge mixinChunk = (LevelChunkBridge) worldIn.getChunkAt(pos);
-        this.tracker$context = BlockPhase.State.DISPENSE.createPhaseContext(PhaseTracker.SERVER)
+        try (final @Nullable PhaseContext<@NonNull ?> context = BlockPhase.State.DISPENSE
+                .createPhaseContext(PhaseTracker.SERVER)
                 .source(spongeBlockSnapshot)
                 .creator(() -> mixinChunk.bridge$getBlockCreatorUUID(pos))
-                .notifier(() -> mixinChunk.bridge$getBlockNotifierUUID(pos))
-                .buildAndSwitch();
+                .notifier(() -> mixinChunk.bridge$getBlockNotifierUUID(pos))) {
+            context.buildAndSwitch();
+            original.call(worldIn, state, pos);
+        }
     }
 
 
-    @Inject(method = "dispenseFrom", at = @At(value = "RETURN"))
-    private void tracker$closeContextOnDispensing(final ServerLevel worldIn, final BlockState state, final BlockPos pos, final CallbackInfo ci) {
-        this.tracker$context.close();
-        this.tracker$context = PhaseContext.empty();
-    }
-
-    @Inject(method = "dispenseFrom",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/core/dispenser/DispenseItemBehavior;dispense(Lnet/minecraft/core/dispenser/BlockSource;Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/world/item/ItemStack;"
-            ),
-            slice = @Slice(
-                    from = @At(value = "FIELD",
-                            target = "Lnet/minecraft/core/dispenser/DispenseItemBehavior;NOOP:Lnet/minecraft/core/dispenser/DispenseItemBehavior;"),
-                    to = @At("TAIL")
-            ),
-            locals = LocalCapture.CAPTURE_FAILSOFT
+    @WrapOperation(method = "dispenseFrom",
+        at = @At(
+            value = "INVOKE",
+            target = "Lnet/minecraft/core/dispenser/DispenseItemBehavior;dispense(Lnet/minecraft/core/dispenser/BlockSource;Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/world/item/ItemStack;"
+        ),
+        slice = @Slice(
+            from = @At(value = "FIELD",
+                target = "Lnet/minecraft/core/dispenser/DispenseItemBehavior;NOOP:Lnet/minecraft/core/dispenser/DispenseItemBehavior;"),
+            to = @At("TAIL")
+        )
     )
-    private void tracker$storeOriginalItem(final ServerLevel worldIn,  final BlockState state, final BlockPos pos, final CallbackInfo ci,
-            final DispenserBlockEntity dispenser, final BlockSource source, final int slotIndex, final ItemStack dispensedItem, final DispenseItemBehavior behavior) {
-        final ItemStack tracker$originalItem = ItemStackUtil.cloneDefensiveNative(dispensedItem);
-        this.tracker$originalItem = () -> tracker$originalItem;
+    private ItemStack tracker$storeOriginalItem(final DispenseItemBehavior instance, final BlockSource blockSource, final ItemStack itemStack,
+            final Operation<ItemStack> original, final @Share("original-item") LocalRef<ItemStack> originalItemRef) {
+        originalItemRef.set(ItemStackUtil.cloneDefensiveNative(itemStack));
+        return original.call(instance, blockSource, itemStack);
     }
 
-
-    @Redirect(method = "dispenseFrom",
+    @WrapOperation(method = "dispenseFrom",
             at = @At(value = "INVOKE",
                     target = "Lnet/minecraft/world/level/block/entity/DispenserBlockEntity;setItem(ILnet/minecraft/world/item/ItemStack;)V"))
-    private void tracker$setInventoryContentsCallEvent(final DispenserBlockEntity dispenserTileEntity, final int index, final ItemStack stack) {
+    private void tracker$setInventoryContentsCallEvent(final DispenserBlockEntity dispenserTileEntity, final int index, final ItemStack stack,
+            final Operation<Void> original, final @Share("original-item") LocalRef<ItemStack> originalItemRef) {
         final ItemStack dispensedItem = ItemStack.EMPTY;
         final ItemStackSnapshot snapshot = ItemStackUtil.snapshotOf(dispensedItem);
-        final List<ItemStackSnapshot> original = new ArrayList<>();
-        original.add(snapshot);
+        final List<ItemStackSnapshot> items = new ArrayList<>();
+        items.add(snapshot);
         try (final CauseStackManager.StackFrame frame = PhaseTracker.getInstance().pushCauseFrame()) {
             frame.pushCause(dispenserTileEntity);
-            final DropItemEvent.Pre dropEvent = SpongeEventFactory.createDropItemEventPre(frame.currentCause(), ImmutableList.of(snapshot), original);
-            SpongeCommon.post(dropEvent);
-            if (dropEvent.isCancelled()) {
-                dispenserTileEntity.setItem(index, this.tracker$originalItem.get());
+            final DropItemEvent.Pre dropEvent = SpongeEventFactory.createDropItemEventPre(frame.currentCause(), ImmutableList.of(snapshot), items);
+            if (SpongeCommon.post(dropEvent)) {
+                original.call(dispenserTileEntity, index, originalItemRef.get());
                 return;
             }
 
-            dispenserTileEntity.setItem(index, stack);
-        } finally {
-            this.tracker$originalItem = () -> ItemStack.EMPTY;
+            original.call(dispenserTileEntity, index, stack);
         }
     }
 }

@@ -37,7 +37,6 @@ import org.spongepowered.common.SpongeCommon;
 import org.spongepowered.common.event.tracking.PhaseContext;
 import org.spongepowered.common.event.tracking.PhaseTracker;
 import org.spongepowered.common.event.tracking.context.ICaptureSupplier;
-import org.spongepowered.common.event.tracking.context.transaction.effect.PrepareBlockDrops;
 import org.spongepowered.common.event.tracking.context.transaction.type.TransactionType;
 
 import java.util.Collections;
@@ -151,16 +150,6 @@ public final class TransactionalCaptureSupplier implements ICaptureSupplier, Tra
             this.tail = gameTransaction;
         }
         return null;
-    }
-
-    public void completeBlockDrops(final @Nullable EffectTransactor context) {
-        if (this.effect != null) {
-            if (this.effect.effect == PrepareBlockDrops.getInstance()) {
-                if (context != null) {
-                    context.close();
-                }
-            }
-        }
     }
 
     public void clear() {

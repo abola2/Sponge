@@ -24,6 +24,7 @@
  */
 package org.spongepowered.common.mixin.core.world.level;
 
+import com.llamalad7.mixinextras.expression.Expression;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -39,6 +40,7 @@ import net.minecraft.world.level.ExplosionDamageCalculator;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.api.event.Cause;
 import org.spongepowered.api.event.SpongeEventFactory;
 import org.spongepowered.api.event.world.ExplosionEvent;
@@ -49,7 +51,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyVariable;
+import org.spongepowered.asm.mixin.injection.Slice;
 import org.spongepowered.asm.mixin.injection.Surrogate;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.common.SpongeCommon;
@@ -122,10 +124,14 @@ public abstract class ExplosionMixin implements ExplosionBridge {
         }
     }
 
-    @ModifyVariable(method = "explode", ordinal = 1, at = @At("STORE"))
-    private int impl$initFirstLoopIndex(final int originalIndex) {
-        // If the explosion should not break blocks, skip the loop by modifying the initial index
-        return this.impl$shouldBreakBlocks ? originalIndex : Integer.MAX_VALUE;
+    @Expression("? < 16")
+    @ModifyExpressionValue(method = "explode",
+        at = @At(value = "MIXINEXTRAS:EXPRESSION", ordinal = 0),
+        slice = @Slice(
+            from = @At(value = "FIELD", target = "Lnet/minecraft/world/level/gameevent/GameEvent;EXPLODE:Lnet/minecraft/core/Holder$Reference;", opcode = Opcodes.GETSTATIC),
+            to = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/ExplosionDamageCalculator;getBlockExplosionResistance(Lnet/minecraft/world/level/Explosion;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/material/FluidState;)Ljava/util/Optional;")))
+    private boolean impl$shouldIterateBlocks(final boolean original) {
+        return this.impl$shouldBreakBlocks && original;
     }
 
     @WrapOperation(method = "explode", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;getEntities(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/AABB;)Ljava/util/List;"))

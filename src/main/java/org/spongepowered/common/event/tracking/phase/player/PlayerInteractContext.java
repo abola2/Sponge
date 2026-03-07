@@ -35,6 +35,8 @@ import java.util.Optional;
 public final class PlayerInteractContext extends PhaseContext<PlayerInteractContext> {
 
     private @Nullable ServerLocation containerLocation;
+    private @Nullable IPhaseState<?> parentState;
+    private @Nullable PhaseContext<? extends PhaseContext<?>> parentContext;
 
     PlayerInteractContext(final IPhaseState<PlayerInteractContext> state, final PhaseTracker tracker) {
         super(state, tracker);
@@ -54,5 +56,22 @@ public final class PlayerInteractContext extends PhaseContext<PlayerInteractCont
     protected void reset() {
         super.reset();
         this.containerLocation = null;
+        this.parentState = null;
+        this.parentContext = null;
+    }
+
+
+    public PlayerInteractContext parentContext(IPhaseState<?> currentState, PhaseContext<? extends PhaseContext<?>> currentContext) {
+        this.parentState = currentState;
+        this.parentContext = currentContext;
+        return this;
+    }
+
+    public @Nullable IPhaseState<?> forward() {
+        return this.parentState;
+    }
+
+    public @Nullable PhaseContext<?> forwardContext() {
+        return this.parentContext;
     }
 }

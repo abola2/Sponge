@@ -30,9 +30,13 @@ import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.common.util.DamageEventUtil;
 
 @Mixin(LivingEntity.class)
-public class LivingEntityMixin_Forge_Attack_Impl {
+public abstract class LivingEntityMixin_Forge_Attack_Impl {
+
+    protected DamageEventUtil.DamageEventResult attackImpl$actuallyHurtResult;
+    protected float attackImpl$actuallyHurtFinalDamage;
 
     /**
      * Prevents {@link ServerPlayer#awardStat} from running before event

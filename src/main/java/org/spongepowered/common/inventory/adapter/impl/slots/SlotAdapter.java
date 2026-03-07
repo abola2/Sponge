@@ -77,6 +77,7 @@ public class SlotAdapter extends BasicInventoryAdapter implements Slot {
         }
 
         this.inventoryAdapter$getFabric().fabric$setStack(this.ordinal, net.minecraft.world.item.ItemStack.EMPTY);
+        this.inventoryAdapter$getFabric().fabric$markDirty();
         return InventoryTransactionResult.builder().type(InventoryTransactionResult.Type.SUCCESS)
                 .transaction(new SlotTransaction(this, ItemStackUtil.snapshotOf(stack), ItemStackSnapshot.empty()))
                 .poll(ItemStackUtil.snapshotOf(stack)).build();
@@ -104,6 +105,7 @@ public class SlotAdapter extends BasicInventoryAdapter implements Slot {
             ItemStackSnapshot newStack = oldStack;
             int push = Math.min(remaining, maxStackSize);
             if (old.isEmpty() && this.slot.setStack(this.inventoryAdapter$getFabric(), ItemStackUtil.cloneDefensiveNative(nativeStack, push))) {
+                this.inventoryAdapter$getFabric().fabric$markDirty();
                 remaining -= push;
                 newStack = ItemStackUtil.snapshotOf(stack);
             } else if (!old.isEmpty() && ItemStackUtil.compareIgnoreQuantity(old, nativeStack) && maxStackSize > old.getCount()) {
@@ -153,6 +155,7 @@ public class SlotAdapter extends BasicInventoryAdapter implements Slot {
         final int push = Math.min(remaining, this.slot.getMaxStackSize(this.inventoryAdapter$getFabric()));
         net.minecraft.world.item.ItemStack newStack = ItemStackUtil.cloneDefensiveNative(nativeStack, push);
         if (this.slot.setStack(this.inventoryAdapter$getFabric(), newStack)) {
+            this.inventoryAdapter$getFabric().fabric$markDirty();
             result.transaction(new SlotTransaction(this, oldSnap, ItemStackUtil.snapshotOf(newStack)));
             remaining -= push;
         }
@@ -167,6 +170,7 @@ public class SlotAdapter extends BasicInventoryAdapter implements Slot {
     @Override
     public void clear() {
         this.slot.setStack(this.inventoryAdapter$getFabric(), net.minecraft.world.item.ItemStack.EMPTY);
+        this.inventoryAdapter$getFabric().fabric$markDirty();
     }
 
     @Override

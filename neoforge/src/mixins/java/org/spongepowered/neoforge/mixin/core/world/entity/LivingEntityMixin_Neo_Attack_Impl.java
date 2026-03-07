@@ -34,9 +34,10 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.common.util.DamageEventUtil;
 
 @Mixin(LivingEntity.class)
-public class LivingEntityMixin_Neo_Attack_Impl {
+public abstract class LivingEntityMixin_Neo_Attack_Impl {
 
     protected DamageEventUtil.DamageEventResult attackImpl$actuallyHurtResult;
+    protected float attackImpl$actuallyHurtFinalDamage;
 
     /**
      * Set absorbed damage after calling {@link LivingEntity#setAbsorptionAmount} in which we called the event

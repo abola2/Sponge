@@ -26,22 +26,29 @@ package org.spongepowered.common.mixin.core.world.level.storage;
 
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.storage.DimensionDataStorage;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
 import org.spongepowered.common.bridge.data.DataCompoundHolder;
+import org.spongepowered.common.bridge.world.level.storage.DimensionDataStorageBridge;
 import org.spongepowered.common.data.DataUtil;
 
 import java.io.File;
 import java.util.function.BiFunction;
 
 @Mixin(DimensionDataStorage.class)
-public abstract class DimensionDataStorageMixin {
+public abstract class DimensionDataStorageMixin implements DimensionDataStorageBridge {
+
+    // @formatter:off
+    private @Nullable ResourceLocation impl$dimensionKey;
+    // @formatter:on
 
     @Inject(method = "readSavedData", at = @At(value = "RETURN", ordinal = 0), locals = LocalCapture.CAPTURE_FAILHARD)
     public void readSpongeMapData(BiFunction<CompoundTag, HolderLookup.Provider, SavedData> var1, DataFixTypes $$1, String var2,
@@ -53,5 +60,15 @@ public abstract class DimensionDataStorageMixin {
             DataUtil.syncTagToData(savedData);
             ((DataCompoundHolder) savedData).data$setCompound(null);
         }
+    }
+
+    @Override
+    public void bridge$dimensionKey(final @Nullable ResourceLocation dimensionKey) {
+        this.impl$dimensionKey = dimensionKey;
+    }
+
+    @Override
+    public @Nullable ResourceLocation bridge$dimensionKey() {
+        return this.impl$dimensionKey;
     }
 }

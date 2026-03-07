@@ -215,6 +215,7 @@ dependencies {
     game(libs.javaxInject)
     game(platform(apiLibs.adventure.bom))
     game(libs.adventure.serializerConfigurate4)
+    game(libs.mixinextras.neo)
 
     val serviceShadedLibraries = serviceShadedLibrariesConfig.name
     serviceShadedLibraries(project(transformersProject.path)) { isTransitive = false }

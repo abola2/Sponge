@@ -53,7 +53,7 @@ import java.util.function.BooleanSupplier;
 public abstract class MinecraftServerMixin_Tracker extends BlockableEventLoopMixin_Tracker {
 
     // @formatter:off
-    @Shadow public abstract boolean shadow$isStopped();
+    @Shadow public abstract boolean shadow$isShutdown();
     // @formatter:on
 
     @Inject(method = "fillSystemReport", at = @At("RETURN"))
@@ -119,7 +119,7 @@ public abstract class MinecraftServerMixin_Tracker extends BlockableEventLoopMix
 
     @Override
     protected boolean tracker$isServerAndIsServerStopped() {
-        return this.shadow$isStopped();
+        return this.shadow$isShutdown();
     }
 
 }

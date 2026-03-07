@@ -24,24 +24,26 @@
  */
 package org.spongepowered.common.mixin.core.world.level.levelgen.structure;
 
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.structure.LegacyStructureDataHandler;
 import net.minecraft.world.level.storage.DimensionDataStorage;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
-import org.spongepowered.common.hooks.PlatformHooks;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
+import org.spongepowered.common.bridge.world.level.storage.DimensionDataStorageBridge;
+
+import java.util.Optional;
 
 @Mixin(LegacyStructureDataHandler.class)
 public abstract class LegacyStructureDataHandlerMixin {
 
-    /**
-     * @author zidane - November, 26th 2020 - Minecraft 1.15.2
-     * @reason Allow the platform to determine how to create the legacy structure data updater
-     */
-    @Overwrite
-    public static LegacyStructureDataHandler getLegacyStructureHandler(final ResourceKey<Level> dimension, final @Nullable DimensionDataStorage savedData) {
-        return PlatformHooks.INSTANCE.getWorldGenerationHooks().createLegacyStructureDataUtil(dimension, savedData);
+    @ModifyVariable(method = "getLegacyStructureHandler", at = @At("HEAD"), argsOnly = true)
+    private static ResourceKey<Level> impl$fixupLevelDimension(final ResourceKey<Level> dimension, final ResourceKey<Level> $$0, final @Nullable DimensionDataStorage $$1) {
+        return Optional.ofNullable(((DimensionDataStorageBridge) $$1).bridge$dimensionKey())
+            .map(k -> ResourceKey.create(Registries.DIMENSION, k))
+            .orElse(dimension);
     }
 }

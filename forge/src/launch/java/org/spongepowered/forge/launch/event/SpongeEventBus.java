@@ -125,7 +125,7 @@ public final class SpongeEventBus extends EventBus {
 
             try (
                 final CauseStackManager.StackFrame frame = PhaseTracker.getInstance().pushCauseFrame();
-                final PhaseContext<@NonNull ?> context = SpongeEventManager.createListenerContext(null))
+                final PhaseContext<@NonNull ?> context = SpongeEventManager.createListenerContext(event, null))
             {
                 if (context != null) {
                     context.buildAndSwitch();

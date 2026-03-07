@@ -27,25 +27,29 @@ package org.spongepowered.common.inject.plugin;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Module;
-import com.google.inject.util.Modules;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.plugin.PluginContainer;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public final class PluginGuice {
 
     public static Injector create(final PluginContainer container, final Class<?> pluginClass, final @Nullable Injector platformInjector) {
-        Module module = Modules.combine(new PrivatePluginModule(container, pluginClass), new PublicPluginModule(container));
+        final List<Module> modules = new ArrayList<>(List.of(new PublicPluginModule(container), new PrivatePluginModule(container, pluginClass)));
 
         final @Nullable Object customModule = container.metadata().property("guice-module").orElse(null);
         if (customModule != null) {
             try {
                 final Class<?> moduleClass = Class.forName(customModule.toString(), true, pluginClass.getClassLoader());
                 final Module moduleInstance = (Module) moduleClass.getConstructor().newInstance();
-                module = Modules.override(module).with(moduleInstance);
+                modules.add(moduleInstance);
             } catch (final Exception ex) {
                 throw new RuntimeException("Failed to instantiate the custom module!", ex);
             }
         }
+
+        final Module module = new PriorityOverrideModule(modules);
 
         if (platformInjector != null) {
             return platformInjector.createChildInjector(module);

@@ -24,21 +24,18 @@
  */
 package org.spongepowered.common.inject.plugin;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.inject.Binder;
 import com.google.inject.Binding;
 import com.google.inject.Injector;
 import com.google.inject.Key;
-import com.google.inject.spi.Element;
+import com.google.inject.Provider;
 import com.google.inject.spi.ElementSource;
-import com.google.inject.spi.ExposedBinding;
-import com.google.inject.spi.PrivateElements;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -46,7 +43,7 @@ import java.util.function.Supplier;
 final class BindingHelper {
 
     private final Binder binder;
-    private final Map<Key<?>, Object> combinedKeys;
+    private final Map<Key<?>, Provider<?>> combinedKeys;
 
     BindingHelper(final Binder binder) {
         this.binder = binder;
@@ -55,14 +52,8 @@ final class BindingHelper {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     void bind() {
-        for (final Map.Entry<Key<?>, Object> key : this.combinedKeys.entrySet()) {
-            Object value = key.getValue();
-            if (value instanceof Set<?> set) {
-                value = ImmutableSet.copyOf(set);
-            } else if (value instanceof Iterable<?> iterable) {
-                value = ImmutableList.copyOf(iterable);
-            }
-            this.binder.bind((Key) key.getKey()).toInstance(value);
+        for (final Map.Entry<Key<?>, Provider<?>> entry : this.combinedKeys.entrySet()) {
+            this.binder.bind((Key) entry.getKey()).toProvider(entry.getValue());
         }
     }
 
@@ -72,27 +63,8 @@ final class BindingHelper {
                 continue;
             }
 
-            this.bindFrom(fromInjector, binding);
+            this.bind(fromInjector, binding);
         }
-    }
-
-    @SuppressWarnings("rawtypes")
-    void bindFrom(final Injector fromInjector, final Binding binding) {
-        if (binding instanceof final ExposedBinding<?> exposedBinding) {
-            final PrivateElements privateElements = exposedBinding.getPrivateElements();
-            for (final Element privateElement : privateElements.getElements()) {
-                if (!(privateElement instanceof final Binding privateBinding)
-                    || !privateElements.getExposedKeys().contains(privateBinding.getKey())) {
-                    continue;
-                }
-
-                this.bindFrom(fromInjector, privateBinding);
-            }
-
-            return;
-        }
-
-        this.bind(fromInjector, binding);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -100,23 +72,39 @@ final class BindingHelper {
         final Key key = binding.getKey();
         final Class<?> clazz = key.getTypeLiteral().getRawType();
         if (Iterable.class.isAssignableFrom(clazz)) {
-            final Collection destinationCollection;
             if (Set.class.isAssignableFrom(clazz)) {
-                destinationCollection = this.getBindData(key, () -> new HashSet<>());
+                this.getBindData(key, () -> new CollectionProviderCombiner<>(HashSet::new)).add(fromInjector.getProvider(key));
             } else {
-                destinationCollection = this.getBindData(key, () -> new ArrayList<>());
-            }
-            final Iterable<Object> originalIterable = (Iterable<Object>) fromInjector.getInstance(key);
-            for (final Object value : originalIterable) {
-                destinationCollection.add(value);
+                this.getBindData(key, () -> new CollectionProviderCombiner<>(ArrayList::new)).add(fromInjector.getProvider(key));
             }
         } else {
-            this.binder.bind(key).toProvider(() -> fromInjector.getInstance(key));
+            this.binder.bind(key).toProvider(fromInjector.getProvider(key));
         }
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T getBindData(final Key<T> key, final Supplier<T> newValueSupplier) {
-        return (T) this.combinedKeys.computeIfAbsent(key, $ -> newValueSupplier.get());
+    private <T, P extends Provider<T>> P getBindData(final Key<T> key, final Supplier<P> newValueSupplier) {
+        return (P) this.combinedKeys.computeIfAbsent(key, $ -> newValueSupplier.get());
+    }
+
+    private static final class CollectionProviderCombiner<T> implements Provider<Collection<T>> {
+
+        private final List<Provider<Collection<T>>> providers = new ArrayList<>();
+        private final Supplier<Collection<T>> collectionSupplier;
+
+        CollectionProviderCombiner(final Supplier<Collection<T>> collectionSupplier) {
+            this.collectionSupplier = collectionSupplier;
+        }
+
+        @Override
+        public Collection<T> get() {
+            final Collection<T> collection = this.collectionSupplier.get();
+            this.providers.forEach(p -> collection.addAll(p.get()));
+            return collection;
+        }
+
+        void add(final Provider<Collection<T>> provider) {
+            this.providers.add(provider);
+        }
     }
 }

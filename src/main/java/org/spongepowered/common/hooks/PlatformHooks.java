@@ -51,7 +51,6 @@ public final class PlatformHooks {
     private DimensionHooks dimensionHooks = new DimensionHooks() {};
     private EventHooks eventHooks = new EventHooks() {};
     private GeneralHooks generalHooks = new GeneralHooks() {};
-    private WorldGenerationHooks worldGenerationHooks = new WorldGenerationHooks() {};
     private InventoryHooks inventoryHooks = new InventoryHooks() {};
     private WorldHooks worldHooks = new WorldHooks() {};
     private ItemHooks itemHooks = new ItemHooks() {};
@@ -80,14 +79,6 @@ public final class PlatformHooks {
 
     public void setGeneralHooks(final GeneralHooks generalHooks) {
         this.generalHooks = Objects.requireNonNull(generalHooks);
-    }
-
-    public WorldGenerationHooks getWorldGenerationHooks() {
-        return this.worldGenerationHooks;
-    }
-
-    public void setWorldGenerationHooks(final WorldGenerationHooks worldGenerationHooks) {
-        this.worldGenerationHooks = Objects.requireNonNull(worldGenerationHooks);
     }
 
     public InventoryHooks getInventoryHooks() {

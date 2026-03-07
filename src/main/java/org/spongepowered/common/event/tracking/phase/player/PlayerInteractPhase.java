@@ -24,9 +24,23 @@
  */
 package org.spongepowered.common.event.tracking.phase.player;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.SpawnEggItem;
+import org.spongepowered.api.block.transaction.BlockTransactionReceipt;
+import org.spongepowered.api.event.cause.entity.SpawnType;
+import org.spongepowered.api.event.cause.entity.SpawnTypes;
+import org.spongepowered.api.item.inventory.ItemStack;
+import org.spongepowered.common.bridge.world.TrackedWorldBridge;
+import org.spongepowered.common.bridge.world.level.TrackableBlockEventDataBridge;
+import org.spongepowered.common.event.tracking.IPhaseState;
 import org.spongepowered.common.event.tracking.PhaseTracker;
 import org.spongepowered.common.event.tracking.PooledPhaseState;
 import org.spongepowered.common.event.tracking.TrackingUtil;
+import org.spongepowered.common.event.tracking.phase.packet.BasicPacketContext;
+import org.spongepowered.common.world.BlockChange;
+
+import java.util.function.Supplier;
 
 public final class PlayerInteractPhase extends PooledPhaseState<PlayerInteractContext> {
 
@@ -38,5 +52,35 @@ public final class PlayerInteractPhase extends PooledPhaseState<PlayerInteractCo
     @Override
     public void unwind(final PlayerInteractContext context) {
         TrackingUtil.processBlockCaptures(context);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Override
+    public void postBlockTransactionApplication(PlayerInteractContext context, BlockChange blockChange, BlockTransactionReceipt receipt) {
+        if (context.forward() != null && context.forwardContext() != null) {
+            ((IPhaseState) context.forward()).postBlockTransactionApplication(context.forwardContext(), blockChange, receipt);
+        }
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Override
+    public void appendNotifierToBlockEvent(
+        final PlayerInteractContext context, final TrackedWorldBridge mixinWorldServer, final BlockPos pos,
+        final TrackableBlockEventDataBridge blockEvent
+    ) {
+        if (context.forward() != null && context.forwardContext() != null) {
+            ((IPhaseState) context.forward()).appendNotifierToBlockEvent(context.forwardContext(), mixinWorldServer, pos, blockEvent);
+        }
+    }
+
+    @Override
+    public Supplier<SpawnType> getSpawnTypeForTransaction(
+        final PlayerInteractContext context, final Entity entityToSpawn
+    ) {
+        if (context.forwardContext() instanceof BasicPacketContext bpc) {
+            final ItemStack itemStack = bpc.getItemUsed();
+            return itemStack.type() instanceof SpawnEggItem ? SpawnTypes.SPAWN_EGG : SpawnTypes.PLACEMENT;
+        }
+        return super.getSpawnTypeForTransaction(context, entityToSpawn);
     }
 }

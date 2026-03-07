@@ -24,18 +24,23 @@
  */
 package org.spongepowered.vanilla.mixin.core.server.network;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.network.protocol.game.ServerGamePacketListener;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.inventory.RecipeBookMenu;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.spongepowered.api.item.inventory.Inventory;
 import org.spongepowered.api.item.inventory.crafting.CraftingInventory;
 import org.spongepowered.api.item.inventory.query.QueryTypes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.common.SpongeCommon;
+import org.spongepowered.common.accessor.world.inventory.AbstractFurnaceMenuAccessor;
 import org.spongepowered.common.event.tracking.PhaseContext;
 import org.spongepowered.common.event.tracking.PhaseTracker;
 import org.spongepowered.common.event.tracking.context.transaction.EffectTransactor;
@@ -44,22 +49,36 @@ import org.spongepowered.common.event.tracking.context.transaction.Transactional
 @Mixin(value = ServerGamePacketListenerImpl.class, priority = 999)
 public abstract class ServerGamePacketListenerImplMixin_Vanilla implements ServerGamePacketListener {
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    @Redirect(method = "lambda$handlePlaceRecipe$10",
+    @SuppressWarnings({"rawtypes"})
+    @WrapOperation(method = "lambda$handlePlaceRecipe$10",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/world/inventory/RecipeBookMenu;handlePlacement(ZLnet/minecraft/world/item/crafting/RecipeHolder;Lnet/minecraft/server/level/ServerPlayer;)V"))
-    private void vanilla$onPlaceRecipe(final RecipeBookMenu recipeBookMenu, final boolean shift, final RecipeHolder<?> recipe, final net.minecraft.server.level.ServerPlayer player) {
+    private void vanilla$onPlaceRecipe(
+        final RecipeBookMenu instance,
+        final boolean shift,
+        final RecipeHolder<Recipe<?>> recipe,
+        final ServerPlayer player,
+        final Operation<Void> original
+    ) {
         final PhaseContext<@NonNull ?> context = PhaseTracker.SERVER.getPhaseContext();
         final TransactionalCaptureSupplier transactor = context.getTransactor();
 
-        final Inventory craftInv = ((Inventory) player.containerMenu).query(QueryTypes.INVENTORY_TYPE.get().of(CraftingInventory.class));
+        final var menu = (Inventory) player.containerMenu;
+        if ( menu instanceof AbstractFurnaceMenuAccessor afm && afm.accessor$container() instanceof BlockEntity be) {
+            try (final EffectTransactor ignored = transactor.logPlaceCookingRecipe(be,shift, recipe, player)) {
+                original.call(instance, shift, recipe, player);
+                player.containerMenu.broadcastChanges();
+                return;
+            }
+        }
+        Inventory craftInv = menu.query(QueryTypes.INVENTORY_TYPE.get().of(CraftingInventory.class));
         if (!(craftInv instanceof CraftingInventory)) {
-            recipeBookMenu.handlePlacement(shift, recipe, player);
+            original.call(instance, shift, recipe, player);
             SpongeCommon.logger().warn("Detected crafting without a InventoryCrafting!? Crafting Event will not fire.");
             return;
         }
 
-        try (final EffectTransactor ignored = transactor.logPlaceRecipe(shift, (RecipeHolder) recipe, player, (CraftingInventory) craftInv)) {
-            recipeBookMenu.handlePlacement(shift, recipe, player);
+        try (final EffectTransactor ignored = transactor.logPlaceRecipe(shift, recipe, player, (CraftingInventory) craftInv)) {
+            original.call(instance, shift, recipe, player);
             player.containerMenu.broadcastChanges();
         }
     }

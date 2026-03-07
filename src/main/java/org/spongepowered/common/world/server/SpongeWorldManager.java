@@ -73,6 +73,7 @@ import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.PrimaryLevelData;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.level.storage.WorldData;
+import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.api.ResourceKey;
 import org.spongepowered.api.Server;
@@ -107,7 +108,7 @@ import org.spongepowered.common.launch.Launch;
 import org.spongepowered.common.launch.config.core.SpongeConfigs;
 import org.spongepowered.common.user.SpongeUserManager;
 import org.spongepowered.common.util.Constants;
-import org.spongepowered.common.util.FutureUtil;
+import org.spongepowered.common.util.ExecutorUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -120,17 +121,19 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class SpongeWorldManager implements WorldManager {
@@ -138,6 +141,7 @@ public class SpongeWorldManager implements WorldManager {
     private final MinecraftServer server;
     private final Path defaultWorldDirectory, customWorldsDirectory;
     private final Map<net.minecraft.resources.ResourceKey<Level>, ServerLevel> worlds;
+    private final Map<net.minecraft.resources.ResourceKey<Level>, WorldOperationTask> worldOperations = new HashMap<>();
 
     public SpongeWorldManager(final MinecraftServer server) {
         this.server = server;
@@ -255,66 +259,77 @@ public class SpongeWorldManager implements WorldManager {
         final ResourceKey key = Objects.requireNonNull(template, "template").key();
         final net.minecraft.resources.ResourceKey<Level> registryKey = SpongeWorldManager.createRegistryKey(key);
         if (Level.OVERWORLD.equals(registryKey)) {
-            return FutureUtil.completedWithException(new IllegalArgumentException("The default world cannot be told to load!"));
+            return CompletableFuture.failedFuture(new IllegalArgumentException("The default world cannot be told to load!"));
         }
 
-        final ServerLevel serverWorld = this.worlds.get(registryKey);
-        if (serverWorld != null) {
-            return CompletableFuture.completedFuture((ServerWorld) serverWorld);
-        }
+        return this.performWorldOperation(registryKey, WorldOperationType.LOAD, t -> {
+            final ServerLevel serverWorld = this.worlds.get(registryKey);
+            if (serverWorld != null) {
+                return CompletableFuture.completedFuture((ServerWorld) serverWorld);
+            }
 
-        this.saveTemplate(template);
-
-        return this.loadWorld0(registryKey, ((SpongeWorldTemplate) template).levelStem());
+            return this.saveTemplate(template).thenCompose($ -> this.loadWorld0(t, registryKey, ((SpongeWorldTemplate) template).levelStem()));
+        });
     }
 
     @Override
     public CompletableFuture<ServerWorld> loadWorld(final ResourceKey key) {
         if (DefaultWorldKeys.DEFAULT.equals(key)) {
-            return FutureUtil.completedWithException(new IllegalArgumentException("The default world cannot be told to load!"));
+            return CompletableFuture.failedFuture(new IllegalArgumentException("The default world cannot be told to load!"));
         }
 
         final net.minecraft.resources.ResourceKey<Level> registryKey = SpongeWorldManager.createRegistryKey(Objects.requireNonNull(key, "key"));
-        final ServerLevel world = this.worlds.get(registryKey);
-        if (world != null) {
-            return CompletableFuture.completedFuture((ServerWorld) world);
-        }
 
-        // First find a loaded level-stem / To load based on a datapack load using the WorldTemplate instead
-
-        final net.minecraft.resources.ResourceKey<LevelStem> stemKey = net.minecraft.resources.ResourceKey.create(Registries.LEVEL_STEM, (ResourceLocation) (Object) key);
-        final @Nullable LevelStem levelStem = SpongeCommon.vanillaRegistry(Registries.LEVEL_STEM).get(stemKey);
-        if (levelStem != null) {
-            return this.loadWorld0(registryKey, levelStem);
-        }
-
-        // Then attempt to load from data pack
-        final DataPack<WorldTemplate> pack = this.findPack(key);
-        return this.loadTemplate(pack, key).thenCompose(template -> {
-            if (template.isEmpty()) {
-                return FutureUtil.completedWithException(new IOException(String.format("Failed to load a template for '%s'!", key)));
+        return this.performWorldOperation(registryKey, WorldOperationType.LOAD, t -> {
+            final ServerLevel world = this.worlds.get(registryKey);
+            if (world != null) {
+                return CompletableFuture.completedFuture((ServerWorld) world);
             }
-            return this.loadWorld0(registryKey, ((SpongeWorldTemplate) template.get()).levelStem());
+
+            // First find a loaded level-stem / To load based on a datapack load using the WorldTemplate instead
+
+            final net.minecraft.resources.ResourceKey<LevelStem> stemKey = net.minecraft.resources.ResourceKey.create(Registries.LEVEL_STEM, (ResourceLocation) (Object) key);
+            final @Nullable LevelStem levelStem = SpongeCommon.vanillaRegistry(Registries.LEVEL_STEM).get(stemKey);
+            if (levelStem != null) {
+                return this.loadWorld0(t, registryKey, levelStem);
+            }
+
+            // Then attempt to load from data pack
+            final DataPack<WorldTemplate> pack = this.findPack(key);
+            return this.loadTemplate(pack, key).thenCompose(template -> {
+                if (template.isEmpty()) {
+                    return CompletableFuture.failedFuture(new IOException(String.format("Failed to load a template for '%s'!", key)));
+                }
+                return this.loadWorld0(t, registryKey, ((SpongeWorldTemplate) template.get()).levelStem());
+            });
         });
     }
 
-    private CompletableFuture<ServerWorld> loadWorld0(final net.minecraft.resources.ResourceKey<Level> registryKey, final LevelStem levelStem) {
-        final ResourceKey worldKey = (ResourceKey) (Object) registryKey.location();
+    private CompletableFuture<ServerWorld> loadWorld0(final WorldOperationTask task, final net.minecraft.resources.ResourceKey<Level> registryKey, final LevelStem levelStem) {
+        return CompletableFuture.<CompletableFuture<ServerLevel>>supplyAsync(() -> {
+            if (task.isCancelled()) {
+                return CompletableFuture.failedFuture(new CancellationException());
+            }
 
-        MinecraftServerAccessor.accessor$LOGGER().info("Loading world '{}'", worldKey);
+            final ResourceKey worldKey = (ResourceKey) (Object) registryKey.location();
 
-        final ServerLevel level;
-        try {
-            level = this.createNonDefaultLevel(registryKey, levelStem, worldKey);
-        } catch (final IOException e) {
-            return FutureUtil.completedWithException(new RuntimeException(String.format("Failed to create level data for world '%s'!", worldKey), e));
-        }
+            MinecraftServerAccessor.accessor$LOGGER().info("Loading world '{}'", worldKey);
 
-        return SpongeCommon.asyncScheduler().submit(() -> this.prepareLevel(level)).thenApply(w -> {
-                    ((MinecraftServerAccessor) this.server).invoker$forceDifficulty();
-                    return w;
-                }).thenCompose(w -> this.loadSpawnChunksAsync(level))
-                  .thenApply(w -> (ServerWorld) w);
+            final ServerLevel level;
+            try {
+                level = this.createNonDefaultLevel(registryKey, levelStem, worldKey);
+            } catch (final IOException e) {
+                return CompletableFuture.failedFuture(new RuntimeException(String.format("Failed to create level data for world '%s'!", worldKey), e));
+            }
+
+            this.prepareLevel(level);
+
+            ((MinecraftServerAccessor) this.server).invoker$forceDifficulty();
+
+            return this.loadSpawnChunksAsync(task, level);
+        }, SpongeCommon.server())
+            .thenCompose(Function.identity())
+            .thenApply(w -> (ServerWorld) w);
     }
 
     private LevelStorageSource.LevelStorageAccess createLevelStorageAccess(final ResourceKey worldKey) throws IOException {
@@ -362,6 +377,7 @@ public class SpongeWorldManager implements WorldManager {
         return this.unloadWorld((ServerWorld) world);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public CompletableFuture<Boolean> unloadWorld(final ServerWorld world) {
         final net.minecraft.resources.ResourceKey<Level> registryKey = SpongeWorldManager.createRegistryKey(Objects.requireNonNull(world, "world").key());
@@ -370,42 +386,61 @@ public class SpongeWorldManager implements WorldManager {
             return CompletableFuture.completedFuture(false);
         }
 
-        if (world != this.worlds.get(registryKey)) {
-            return CompletableFuture.completedFuture(false);
+        final @Nullable WorldOperationTask pendingTask = this.worldOperations.get(registryKey);
+        if (pendingTask != null && pendingTask.type() == WorldOperationType.UNLOAD) {
+            return (CompletableFuture<Boolean>) pendingTask.future();
         }
 
-        return this.unloadWorld0((ServerLevel) world);
+        return this.performWorldOperation(registryKey, WorldOperationType.UNLOAD, t -> {
+            if (world != this.worlds.get(registryKey)) {
+                return CompletableFuture.completedFuture(false);
+            }
+
+            return this.unloadWorld0(t, (ServerLevel) world);
+        });
     }
 
     @Override
     public CompletableFuture<Optional<ServerWorldProperties>> loadProperties(final ResourceKey key) {
         final net.minecraft.resources.ResourceKey<Level> registryKey = SpongeWorldManager.createRegistryKey(Objects.requireNonNull(key, "key"));
 
-        if (this.worlds.get(registryKey) != null) {
-            return CompletableFuture.completedFuture(Optional.empty());
-        }
-
-        if (!this.worldExists(key)) {
-            return CompletableFuture.completedFuture(Optional.empty());
-        }
-
-        final PrimaryLevelData levelData;
-        try (var storageSource = this.createLevelStorageAccess(key)) {
-            final PrimaryLevelData defaultLevelData = (PrimaryLevelData) this.server.getWorldData();
-            levelData = this.loadLevelData(defaultLevelData.getDataConfiguration(), storageSource.getDataTag());
-        } catch (final Exception e) {
-            return FutureUtil.completedWithException(e);
-        }
-
-        final DataPack<WorldTemplate> pack = this.findPack(key);
-        return this.loadTemplate(pack, key).thenCompose(template -> {
-            if (template.isPresent()) {
-                final LevelStem scratch = ((SpongeWorldTemplate) template.get()).levelStem();
-                ((PrimaryLevelDataBridge) levelData).bridge$populateFromLevelStem(scratch);
+        return this.performWorldOperation(registryKey, WorldOperationType.LOAD, t -> {
+            if (t.isCancelled()) {
+                CompletableFuture.failedFuture(new CancellationException());
             }
 
-            ((PrimaryLevelDataBridge) levelData).bridge$spongeData().setKey(key);
-            return CompletableFuture.completedFuture(Optional.of((ServerWorldProperties) levelData));
+            if (this.worlds.get(registryKey) != null) {
+                return CompletableFuture.completedFuture(Optional.empty());
+            }
+
+            if (!this.worldExists(key)) {
+                return CompletableFuture.completedFuture(Optional.empty());
+            }
+
+            return SpongeCommon.asyncScheduler().submit(() -> {
+                if (t.isCancelled()) {
+                    CompletableFuture.failedFuture(new CancellationException());
+                }
+
+                final PrimaryLevelData levelData;
+                try (var storageSource = this.createLevelStorageAccess(key)) {
+                    final PrimaryLevelData defaultLevelData = (PrimaryLevelData) this.server.getWorldData();
+                    levelData = this.loadLevelData(defaultLevelData.getDataConfiguration(), storageSource.getDataTag());
+                } catch (final Exception e) {
+                    throw new RuntimeException(e);
+                }
+
+                final DataPack<WorldTemplate> pack = this.findPack(key);
+                return this.loadTemplate(pack, key).thenApply(template -> {
+                    if (template.isPresent()) {
+                        final LevelStem scratch = ((SpongeWorldTemplate) template.get()).levelStem();
+                        ((PrimaryLevelDataBridge) levelData).bridge$populateFromLevelStem(scratch);
+                    }
+
+                    ((PrimaryLevelDataBridge) levelData).bridge$spongeData().setKey(key);
+                    return Optional.of((ServerWorldProperties) levelData);
+                });
+            }).thenCompose(Function.identity());
         });
     }
 
@@ -413,28 +448,32 @@ public class SpongeWorldManager implements WorldManager {
     public CompletableFuture<Boolean> saveProperties(final ServerWorldProperties properties) {
         final net.minecraft.resources.ResourceKey<Level> registryKey = SpongeWorldManager.createRegistryKey(Objects.requireNonNull(properties, "properties").key());
 
-        if (this.worlds.get(registryKey) != null) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        if (properties instanceof WorldData worldData) {
-            try {
-                this.saveLevelDat(worldData, properties.key());
-            } catch (Exception ex) {
-                return FutureUtil.completedWithException(ex);
-            }
-        }
-        // TODO else: what about DerivedDataLevel?
-
-        // Properties doesn't have everything we need...namely the generator, load the template and set values we actually got
-        final DataPack<WorldTemplate> pack = this.findPack(properties.key());
-        return this.loadTemplate(pack, properties.key()).thenCompose(r -> {
-            final WorldTemplate template = r.orElse(null);
-            if (template != null) {
-                return this.saveTemplate(WorldTemplate.builder().from(template).from(properties).build());
+        return this.performWorldOperation(registryKey, WorldOperationType.SAVE, t -> {
+            if (this.worlds.get(registryKey) != null) {
+                return CompletableFuture.completedFuture(false);
             }
 
-            return CompletableFuture.completedFuture(true);
+            return SpongeCommon.asyncScheduler().<CompletableFuture<Boolean>>submit(() -> {
+                if (properties instanceof WorldData worldData) {
+                    try {
+                        this.saveLevelDat(worldData, properties.key());
+                    } catch (Exception ex) {
+                        return CompletableFuture.failedFuture(ex);
+                    }
+                }
+                // TODO else: what about DerivedDataLevel?
+
+                // Properties doesn't have everything we need...namely the generator, load the template and set values we actually got
+                final DataPack<WorldTemplate> pack = this.findPack(properties.key());
+                return this.loadTemplate(pack, properties.key()).thenCompose(r -> {
+                    final WorldTemplate template = r.orElse(null);
+                    if (template != null) {
+                        return this.saveTemplate(WorldTemplate.builder().from(template).from(properties).build());
+                    }
+
+                    return CompletableFuture.completedFuture(true);
+                });
+            }).thenCompose(Function.identity());
         });
     }
 
@@ -454,124 +493,134 @@ public class SpongeWorldManager implements WorldManager {
             return CompletableFuture.completedFuture(false);
         }
 
-        if (!this.worldExists(key)) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        if (this.worldExists(copyKey)) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        final ServerLevel loadedWorld = this.worlds.get(registryKey);
-        final boolean disableLevelSaving;
-
-        if (loadedWorld != null) {
-            disableLevelSaving = loadedWorld.noSave;
-            loadedWorld.save(null, true, loadedWorld.noSave);
-            loadedWorld.noSave = true;
-        } else {
-            disableLevelSaving = false;
-        }
-
-        final boolean isDefaultWorld = DefaultWorldKeys.DEFAULT.equals(key);
-
-        return CompletableFuture.runAsync(() -> {
-            final Path originalDirectory = this.getDirectory(key);
-            final Path copyDirectory = this.getDirectory(copyKey);
-
-            try {
-                Files.walkFileTree(originalDirectory, new SimpleFileVisitor<Path>() {
-                    @Override
-                    public FileVisitResult preVisitDirectory(final Path dir, final BasicFileAttributes attrs) throws IOException {
-                        // Silly recursion if the default world is being copied
-                        if (dir.getFileName().toString().equals(Constants.Sponge.World.DIMENSIONS_DIRECTORY)) {
-                            return FileVisitResult.SKIP_SUBTREE;
-                        }
-
-                        // Silly copying of vanilla sub worlds if the default world is being copied
-                        if (isDefaultWorld && SpongeWorldManager.this.isVanillaSubWorld(dir.getFileName().toString())) {
-                            return FileVisitResult.SKIP_SUBTREE;
-                        }
-
-                        final Path relativize = originalDirectory.relativize(dir);
-                        final Path directory = copyDirectory.resolve(relativize);
-                        Files.createDirectories(directory);
-
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult visitFile(final Path file, final BasicFileAttributes attrs) throws IOException {
-                        final String fileName = file.getFileName().toString();
-                        // Do not copy backups (not relevant anymore)
-                        if (fileName.equals(Constants.Sponge.World.LEVEL_SPONGE_DAT_OLD)) {
-                            return FileVisitResult.CONTINUE;
-                        }
-                        if (fileName.equals(Constants.World.LEVEL_DAT_OLD)) {
-                            return FileVisitResult.CONTINUE;
-                        }
-                        Files.copy(file, copyDirectory.resolve(originalDirectory.relativize(file)), StandardCopyOption.COPY_ATTRIBUTES,
-                            StandardCopyOption.REPLACE_EXISTING);
-
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-            } catch (final IOException e) {
-                // Bail the whole deal if we hit IO problems!
-                try {
-                    Files.walkFileTree(copyDirectory, DeleteFileVisitor.INSTANCE);
-                } catch (final IOException ignore) {
+        return this.performWorldOperation(registryKey, WorldOperationType.COPY, t ->
+            this.performWorldOperation(copyRegistryKey, WorldOperationType.COPY, ct -> {
+                if (!this.worldExists(key)) {
+                    return CompletableFuture.completedFuture(false);
                 }
 
-                throw new CompletionException(e);
-            }
+                if (this.worldExists(copyKey)) {
+                    return CompletableFuture.completedFuture(false);
+                }
 
-            if (loadedWorld != null) {
-                loadedWorld.noSave = disableLevelSaving;
-            }
+                final ServerLevel loadedWorld = this.worlds.get(registryKey);
+                final boolean disableLevelSaving;
 
-            final Path configFile = this.getConfigFile(key);
-            final Path copyConfigFile = this.getConfigFile(copyKey);
+                if (loadedWorld != null) {
+                    disableLevelSaving = loadedWorld.noSave;
+                    loadedWorld.save(null, true, loadedWorld.noSave);
+                    loadedWorld.noSave = true;
+                } else {
+                    disableLevelSaving = false;
+                }
 
-            try {
-                Files.createDirectories(copyConfigFile.getParent());
-                Files.copy(configFile, copyConfigFile, StandardCopyOption.REPLACE_EXISTING);
-            } catch (final IOException e) {
-                throw new CompletionException(e);
-            }
-        }).thenApplyAsync($ -> {
-            try {
-                this.server().dataPackManager().copy(this.findPack(key), key, copyKey);
-            } catch (final IOException e) {
-                throw new CompletionException(e);
-            }
+                final boolean isDefaultWorld = DefaultWorldKeys.DEFAULT.equals(key);
 
-            return true;
-        }, SpongeCommon.server());
+                return CompletableFuture.runAsync(() -> {
+                    final Path originalDirectory = this.getDirectory(key);
+                    final Path copyDirectory = this.getDirectory(copyKey);
+
+                    try {
+                        Files.walkFileTree(originalDirectory, new SimpleFileVisitor<Path>() {
+                            @Override
+                            public FileVisitResult preVisitDirectory(final Path dir, final BasicFileAttributes attrs) throws IOException {
+                                // Silly recursion if the default world is being copied
+                                if (dir.getFileName().toString().equals(Constants.Sponge.World.DIMENSIONS_DIRECTORY)) {
+                                    return FileVisitResult.SKIP_SUBTREE;
+                                }
+
+                                // Silly copying of vanilla sub worlds if the default world is being copied
+                                if (isDefaultWorld && SpongeWorldManager.this.isVanillaSubWorld(dir.getFileName().toString())) {
+                                    return FileVisitResult.SKIP_SUBTREE;
+                                }
+
+                                final Path relativize = originalDirectory.relativize(dir);
+                                final Path directory = copyDirectory.resolve(relativize);
+                                Files.createDirectories(directory);
+
+                                return FileVisitResult.CONTINUE;
+                            }
+
+                            @Override
+                            public FileVisitResult visitFile(final Path file, final BasicFileAttributes attrs) throws IOException {
+                                final String fileName = file.getFileName().toString();
+                                // Do not copy backups (not relevant anymore)
+                                if (fileName.equals(Constants.Sponge.World.LEVEL_SPONGE_DAT_OLD)) {
+                                    return FileVisitResult.CONTINUE;
+                                }
+                                if (fileName.equals(Constants.World.LEVEL_DAT_OLD)) {
+                                    return FileVisitResult.CONTINUE;
+                                }
+                                Files.copy(file, copyDirectory.resolve(originalDirectory.relativize(file)), StandardCopyOption.COPY_ATTRIBUTES,
+                                    StandardCopyOption.REPLACE_EXISTING);
+
+                                return FileVisitResult.CONTINUE;
+                            }
+                        });
+                    } catch (final IOException e) {
+                        // Bail the whole deal if we hit IO problems!
+                        try {
+                            Files.walkFileTree(copyDirectory, DeleteFileVisitor.INSTANCE);
+                        } catch (final IOException ignore) {
+                        }
+
+                        throw new CompletionException(e);
+                    }
+
+                    final Path configFile = this.getConfigFile(key);
+                    final Path copyConfigFile = this.getConfigFile(copyKey);
+
+                    try {
+                        Files.createDirectories(copyConfigFile.getParent());
+                        Files.copy(configFile, copyConfigFile, StandardCopyOption.REPLACE_EXISTING);
+                    } catch (final IOException e) {
+                        throw new CompletionException(e);
+                    }
+                }).whenCompleteAsync(($0, $1) -> {
+                    if (loadedWorld != null) {
+                        loadedWorld.noSave = disableLevelSaving;
+                    }
+                }, SpongeCommon.server())
+                .thenApplyAsync($ -> {
+                    try {
+                        this.server().dataPackManager().copy(this.findPack(key), key, copyKey);
+                    } catch (final IOException e) {
+                        throw new CompletionException(e);
+                    }
+
+                    return true;
+                }, SpongeCommon.server());
+            })
+        );
     }
 
     @Override
     public CompletableFuture<Boolean> moveWorld(final ResourceKey key, final ResourceKey movedKey) {
         final net.minecraft.resources.ResourceKey<Level> registryKey = SpongeWorldManager.createRegistryKey(Objects.requireNonNull(key, "key"));
+        final net.minecraft.resources.ResourceKey<Level> movedRegistryKey = SpongeWorldManager.createRegistryKey(Objects.requireNonNull(movedKey, "movedKey"));
 
         if (Level.OVERWORLD.equals(registryKey)) {
             return CompletableFuture.completedFuture(false);
         }
 
-        if (!this.worldExists(key)) {
-            return CompletableFuture.completedFuture(false);
-        }
+        return this.performWorldOperation(registryKey, WorldOperationType.MOVE, t ->
+            this.performWorldOperation(movedRegistryKey, WorldOperationType.MOVE, mt -> {
+                if (!this.worldExists(key)) {
+                    return CompletableFuture.completedFuture(false);
+                }
 
-        if (this.worldExists(movedKey)) {
-            return CompletableFuture.completedFuture(false);
-        }
+                if (this.worldExists(movedKey)) {
+                    return CompletableFuture.completedFuture(false);
+                }
 
-        final ServerLevel loadedWorld = this.worlds.get(registryKey);
-        if (loadedWorld != null) {
-            return this.unloadWorld0(loadedWorld).thenCompose($ -> this.moveWorld0(key, movedKey));
-        }
+                final ServerLevel loadedWorld = this.worlds.get(registryKey);
+                if (loadedWorld != null) {
+                    return this.unloadWorld0(t, loadedWorld).thenCompose($ -> this.moveWorld0(key, movedKey));
+                }
 
-        return this.moveWorld0(key, movedKey);
+                return this.moveWorld0(key, movedKey);
+            })
+        );
     }
 
     private CompletableFuture<Boolean> moveWorld0(final ResourceKey key, final ResourceKey movedKey) {
@@ -614,30 +663,32 @@ public class SpongeWorldManager implements WorldManager {
             return CompletableFuture.completedFuture(false);
         }
 
-        if (!this.worldExists(key)) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        final ServerLevel loadedWorld = this.worlds.get(registryKey);
-        if (loadedWorld != null) {
-            if (!loadedWorld.getPlayers(p -> true).isEmpty()) {
-                return CompletableFuture.failedFuture(new IOException(String.format("World '%s' was told to unload but players remain.", registryKey.location())));
+        return this.performWorldOperation(registryKey, WorldOperationType.DELETE, t -> {
+            if (!this.worldExists(key)) {
+                return CompletableFuture.completedFuture(false);
             }
 
-            final boolean disableLevelSaving = loadedWorld.noSave;
-            loadedWorld.noSave = true;
-            ((IOWorkerBridge) loadedWorld.getChunkSource().chunkMap.chunkScanner()).bridge$haltStore(true);
-            return this.unloadWorld0(loadedWorld)
-                .thenCompose($ -> this.deleteWorld0(key))
-                .whenComplete(($, e) -> {
-                    if (e != null) {
-                        loadedWorld.noSave = disableLevelSaving;
-                        ((IOWorkerBridge) loadedWorld.getChunkSource().chunkMap.chunkScanner()).bridge$haltStore(false);
-                    }
-                });
-        }
+            final ServerLevel loadedWorld = this.worlds.get(registryKey);
+            if (loadedWorld != null) {
+                if (!loadedWorld.getPlayers(p -> true).isEmpty()) {
+                    return CompletableFuture.failedFuture(new IOException(String.format("World '%s' was told to unload but players remain.", registryKey.location())));
+                }
 
-        return this.deleteWorld0(key);
+                final boolean disableLevelSaving = loadedWorld.noSave;
+                loadedWorld.noSave = true;
+                ((IOWorkerBridge) loadedWorld.getChunkSource().chunkMap.chunkScanner()).bridge$haltStore(true);
+                return this.unloadWorld0(t, loadedWorld)
+                    .thenCompose($ -> this.deleteWorld0(key))
+                    .whenCompleteAsync(($, e) -> {
+                        if (e != null) {
+                            loadedWorld.noSave = disableLevelSaving;
+                            ((IOWorkerBridge) loadedWorld.getChunkSource().chunkMap.chunkScanner()).bridge$haltStore(false);
+                        }
+                    }, SpongeCommon.server());
+            }
+
+            return this.deleteWorld0(key);
+        });
     }
 
     private CompletableFuture<Boolean> deleteWorld0(final ResourceKey key) {
@@ -687,7 +738,11 @@ public class SpongeWorldManager implements WorldManager {
         return this.server().dataPackManager().findPack(DataPackTypes.WORLD, key).orElse(DataPacks.WORLD);
     }
 
-    private CompletableFuture<Boolean> unloadWorld0(final ServerLevel level) {
+    private CompletableFuture<Boolean> unloadWorld0(final WorldOperationTask task, final ServerLevel level) {
+        if (task.isCancelled()) {
+            return CompletableFuture.failedFuture(new CancellationException());
+        }
+
         final net.minecraft.resources.ResourceKey<Level> registryKey = level.dimension();
 
         if (!level.getPlayers(p -> true).isEmpty()) {
@@ -699,6 +754,10 @@ public class SpongeWorldManager implements WorldManager {
         level.save(null, false, level.noSave);
 
         return ((IOWorkerBridge) level.getChunkSource().chunkMap.chunkScanner()).bridge$onIdle().thenComposeAsync($ -> {
+            if (task.isCancelled()) {
+                return CompletableFuture.failedFuture(new CancellationException());
+            }
+
             if (!level.getPlayers(p -> true).isEmpty()) {
                 return CompletableFuture.failedFuture(new IOException(String.format("World '%s' was told to unload but players remain.", registryKey.location())));
             }
@@ -899,7 +958,7 @@ public class SpongeWorldManager implements WorldManager {
     /**
      * Same as loadSpawnChunks but async and without listener.
      */
-    private CompletableFuture<ServerLevel> loadSpawnChunksAsync(final ServerLevel level) {
+    private CompletableFuture<ServerLevel> loadSpawnChunksAsync(final WorldOperationTask operationTask, final ServerLevel level) {
         MinecraftServerAccessor.accessor$LOGGER().info("Preparing start region for dimension {}", level.dimension().location());
 
         final ServerChunkCache chunkSource = level.getChunkSource();
@@ -911,8 +970,11 @@ public class SpongeWorldManager implements WorldManager {
         final CompletableFuture<ServerLevel> generationFuture = new CompletableFuture<>();
         Sponge.asyncScheduler().submit(
             Task.builder().plugin(Launch.instance().platformPlugin()).execute(task -> {
-                if (chunkSource.getTickingGenerated() >= spawnSize) {
-                    Sponge.server().scheduler().submit(Task.builder().plugin(Launch.instance().platformPlugin()).execute(() -> generationFuture.complete(level)).build());
+                if (operationTask.isCancelled()) {
+                    generationFuture.cancel(false);
+                    task.cancel();
+                } else if (chunkSource.getTickingGenerated() >= spawnSize) {
+                    generationFuture.complete(level);
                     // Notify the future that we are done
                     task.cancel(); // And cancel this task
                     MinecraftServerAccessor.accessor$LOGGER().info("Done preparing start region for dimension {}", level.dimension().location());
@@ -920,10 +982,10 @@ public class SpongeWorldManager implements WorldManager {
             }).interval(10, TimeUnit.MILLISECONDS).build()
         );
 
-        return generationFuture.thenApply(v -> {
+        return generationFuture.thenApplyAsync(v -> {
             SpongeWorldManager.updateForcedChunks(v, v.getChunkSource());
             return v;
-        });
+        }, SpongeCommon.server());
     }
 
     /**
@@ -975,7 +1037,7 @@ public class SpongeWorldManager implements WorldManager {
         }
     }
 
-    private CompletionStage<Boolean> saveTemplate(final WorldTemplate template) {
+    private CompletableFuture<Boolean> saveTemplate(final WorldTemplate template) {
         return this.server().dataPackManager().save(template).thenApply(b -> true);
     }
 
@@ -1031,6 +1093,23 @@ public class SpongeWorldManager implements WorldManager {
         return SpongeConfigs.getDirectory().resolve("worlds").resolve(key.namespace()).resolve(key.value() + ".conf");
     }
 
+    private <T> CompletableFuture<T> performWorldOperation(final net.minecraft.resources.ResourceKey<Level> worldKey, final WorldOperationType type,
+            final Function<WorldOperationTask, CompletableFuture<T>> function) {
+        if (SpongeCommon.server().isStopped()) {
+            return ExecutorUtil.serverManagedBlock(SpongeCommon.server(), function.apply(new WorldOperationTask(type, null)));
+        }
+        return this.worldOperations.compute(worldKey, ($, value) -> new WorldOperationTask(type, value))
+            .chain(t -> function.apply(t).whenCompleteAsync(($0, $1) -> this.worldOperations.remove(worldKey, t), SpongeCommon.server()));
+    }
+
+    public CompletableFuture<Void> close() {
+        return CompletableFuture.allOf(this.worldOperations.values().stream().map(t -> {
+            t.cancel();
+
+            return t.future();
+        }).toArray(CompletableFuture[]::new));
+    }
+
     private static PrimaryLevelData.SpecialWorldProperty specialWorldProperty(final LevelStem stem) {
         // Copied from WorldDimensions#specialWorldProperty
         final ChunkGenerator generator = stem.generator();
@@ -1039,5 +1118,68 @@ public class SpongeWorldManager implements WorldManager {
         } else {
             return generator instanceof FlatLevelSource ? PrimaryLevelData.SpecialWorldProperty.FLAT : PrimaryLevelData.SpecialWorldProperty.NONE;
         }
+    }
+
+    private static final class WorldOperationTask {
+
+        private final WorldOperationType type;
+
+        private @MonotonicNonNull CompletableFuture<?> future;
+        private @Nullable WorldOperationTask previous;
+
+        private boolean cancelled;
+
+        WorldOperationTask(final WorldOperationType type, final @Nullable WorldOperationTask previous) {
+            this.type = type;
+            this.previous = previous;
+
+            if (previous != null) {
+                previous.future.whenComplete(($0, $1) -> this.previous = null);
+            }
+        }
+
+        WorldOperationType type() {
+            return this.type;
+        }
+
+        CompletableFuture<?> future() {
+            return this.future;
+        }
+
+        boolean isCancelled() {
+            return this.cancelled;
+        }
+
+        <T> CompletableFuture<T> chain(final Function<WorldOperationTask, CompletableFuture<T>> function) {
+            final @Nullable WorldOperationTask previous = this.previous;
+
+            final CompletableFuture<T> future = previous == null
+                ? function.apply(this)
+                : previous.future.handleAsync(($0, $1) -> function.apply(this), SpongeCommon.server()).thenCompose(Function.identity());
+
+            this.future = future;
+
+            return future;
+        }
+
+        void cancel() {
+            if (this.type == WorldOperationType.LOAD || this.type == WorldOperationType.UNLOAD) {
+                this.cancelled = true;
+            }
+
+            final @Nullable WorldOperationTask previous = this.previous;
+            if (previous != null) {
+                previous.cancel();
+            }
+        }
+    }
+
+    private enum WorldOperationType {
+        LOAD,
+        UNLOAD,
+        SAVE,
+        COPY,
+        MOVE,
+        DELETE
     }
 }

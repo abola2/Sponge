@@ -26,15 +26,19 @@ package org.spongepowered.common.mixin.tracker.util.thread;
 
 import net.minecraft.util.thread.BlockableEventLoop;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.common.event.tracking.PhaseTracker;
 import org.spongepowered.common.event.tracking.phase.plugin.BasicPluginContext;
 import org.spongepowered.common.event.tracking.phase.plugin.PluginPhase;
-import org.spongepowered.common.hooks.PlatformHooks;
 
 @Mixin(BlockableEventLoop.class)
 public abstract class BlockableEventLoopMixin_Tracker<R extends Runnable> {
+
+    // @formatter:off
+    @Shadow protected abstract void dropAllTasks();
+    // @formatter:on
 
     @Redirect(method = "execute",
             at = @At(
@@ -42,9 +46,9 @@ public abstract class BlockableEventLoopMixin_Tracker<R extends Runnable> {
                     target = "Ljava/lang/Runnable;run()V",
                     remap = false))
     private void tracker$callOnMainThreadWithPhaseState(final Runnable runnable) {
-        // This method can be called async while server is stopping
-        if (this.tracker$isServerAndIsServerStopped() && !PlatformHooks.INSTANCE.getGeneralHooks().onServerThread()) {
-            runnable.run();
+        // The server thread has been killed, we are unable to process requests any further.
+        if (this.tracker$isServerAndIsServerStopped()) {
+            this.dropAllTasks();
             return;
         }
 

@@ -36,8 +36,11 @@ import org.spongepowered.api.service.permission.Subject;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.common.bridge.commands.CommandSourceStackBridge;
+import org.spongepowered.common.bridge.commands.CommandsBridge;
 import org.spongepowered.common.command.manager.SpongeCommandManager;
 import org.spongepowered.common.event.tracking.PhaseTracker;
 
@@ -47,7 +50,7 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 @Mixin(Commands.class)
-public abstract class CommandsMixin_Vanilla {
+public abstract class CommandsMixin_Vanilla implements CommandsBridge {
 
     // @formatter:off
     @Shadow private void shadow$fillUsableCommands(final CommandNode<CommandSourceStack> rootCommandSource,
@@ -86,5 +89,10 @@ public abstract class CommandsMixin_Vanilla {
                 p_197052_2_.addChild(node);
             }
         }
+    }
+
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void vanilla$tellDispatcherCommandsAreRegistered(final CallbackInfo ci) {
+        this.bridge$endVanillaRegistration();
     }
 }
