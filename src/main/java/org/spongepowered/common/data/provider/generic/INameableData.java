@@ -24,11 +24,13 @@
  */
 package org.spongepowered.common.data.provider.generic;
 
+import net.kyori.adventure.text.Component;
 import net.minecraft.world.Nameable;
 import org.spongepowered.api.data.Keys;
 import org.spongepowered.common.adventure.SpongeAdventure;
 import org.spongepowered.common.bridge.CustomNameableBridge;
 import org.spongepowered.common.data.provider.DataProviderRegistrator;
+import org.spongepowered.common.entity.player.SpongeUserData;
 
 public final class INameableData {
 
@@ -50,6 +52,9 @@ public final class INameableData {
                             }
                             return false;
                         })
+                .asMutable(SpongeUserData.class)
+                    .create(Keys.DISPLAY_NAME)
+                        .get(h -> Component.text(h.name()))
         ;
     }
     // @formatter:on

@@ -199,7 +199,7 @@ public abstract class LevelChunkMixin_Tracker extends ChunkAccessMixin_Tracker i
         // Make sure to set creator/notifier for TE if any chunk data exists
         // Failure to do this during chunk load will cause TE's to not have proper user tracking
         ((CreatorTrackedBridge) tileEntityIn).tracker$setTrackedUUID(PlayerTracker.Type.CREATOR, ((LevelChunkBridge) this).bridge$getBlockCreatorUUID(tileEntityIn.getBlockPos()).orElse(null));
-        ((CreatorTrackedBridge) tileEntityIn).tracker$setTrackedUUID(PlayerTracker.Type.NOTIFIER, null);
+        ((CreatorTrackedBridge) tileEntityIn).tracker$setTrackedUUID(PlayerTracker.Type.NOTIFIER, ((LevelChunkBridge) this).bridge$getBlockNotifierUUID(tileEntityIn.getBlockPos()).orElse(null));
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

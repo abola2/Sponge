@@ -25,14 +25,20 @@
 package org.spongepowered.common.event.tracking.phase.player;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.SpawnEggItem;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.chunk.LevelChunk;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.spongepowered.api.block.transaction.BlockTransactionReceipt;
 import org.spongepowered.api.event.cause.entity.SpawnType;
 import org.spongepowered.api.event.cause.entity.SpawnTypes;
 import org.spongepowered.api.item.inventory.ItemStack;
 import org.spongepowered.common.bridge.world.TrackedWorldBridge;
 import org.spongepowered.common.bridge.world.level.TrackableBlockEventDataBridge;
+import org.spongepowered.common.bridge.world.level.chunk.LevelChunkBridge;
+import org.spongepowered.common.entity.PlayerTracker;
 import org.spongepowered.common.event.tracking.IPhaseState;
 import org.spongepowered.common.event.tracking.PhaseTracker;
 import org.spongepowered.common.event.tracking.PooledPhaseState;
@@ -59,7 +65,26 @@ public final class PlayerInteractPhase extends PooledPhaseState<PlayerInteractCo
     public void postBlockTransactionApplication(PlayerInteractContext context, BlockChange blockChange, BlockTransactionReceipt receipt) {
         if (context.forward() != null && context.forwardContext() != null) {
             ((IPhaseState) context.forward()).postBlockTransactionApplication(context.forwardContext(), blockChange, receipt);
+            return;
         }
+        // When there is no forwarding state, apply tracker association directly from the context
+        context.getCreator().ifPresent(uuid -> TrackingUtil.associateTrackerToTarget(blockChange, receipt, uuid));
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Override
+    public void associateNeighborStateNotifier(
+        final PlayerInteractContext context, final @Nullable BlockPos sourcePos, final Block block, final BlockPos notifyPos,
+        final ServerLevel minecraftWorld, final PlayerTracker.Type notifier
+    ) {
+        if (context.forward() != null && context.forwardContext() != null) {
+            ((IPhaseState) context.forward()).associateNeighborStateNotifier(context.forwardContext(), sourcePos, block, notifyPos, minecraftWorld, notifier);
+            return;
+        }
+        context.getCreator().ifPresent(uuid -> {
+            final LevelChunk chunk = minecraftWorld.getChunkAt(notifyPos);
+            ((LevelChunkBridge) chunk).bridge$setBlockNotifier(notifyPos, uuid);
+        });
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

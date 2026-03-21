@@ -318,7 +318,7 @@ public class SpongeCommand {
                         final CompletableFuture<Component> creator = this.userIdToComponent(locatableBlock.world()
                                 .get(locatableBlock.blockPosition(), Keys.CREATOR).orElse(null));
                         final CompletableFuture<Component> notifier = this.userIdToComponent(locatableBlock.world()
-                                .get(locatableBlock.blockPosition(), Keys.CREATOR).orElse(null));
+                                .get(locatableBlock.blockPosition(), Keys.NOTIFIER).orElse(null));
                         CompletableFuture.allOf(creator, notifier).thenAcceptAsync(x ->
                                 context.sendMessage(Identity.nil(), Component.text()
                                     .content("Block Info: ")

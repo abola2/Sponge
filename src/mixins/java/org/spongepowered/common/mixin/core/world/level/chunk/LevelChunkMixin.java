@@ -252,7 +252,9 @@ public abstract class LevelChunkMixin extends ChunkAccess implements LevelChunkB
         if (tracker != null) {
             consumer.accept(tracker, index);
         } else {
-            map.put(blockPos, new PlayerTracker(index, type));
+            final PlayerTracker newTracker = new PlayerTracker(index, type);
+            consumer.accept(newTracker, index);
+            map.put(blockPos, newTracker);
         }
     }
 
@@ -291,8 +293,9 @@ public abstract class LevelChunkMixin extends ChunkAccess implements LevelChunkB
             if (SpongeConfigs.getCommon().get().world.invalidLookupUuids.contains(uuid)) {
                 if (key <= Short.MAX_VALUE) {
                     this.impl$trackedShortBlockPositions.remove((short) key);
+                } else {
+                    this.impl$trackedIntBlockPositions.remove(key);
                 }
-                this.impl$trackedIntBlockPositions.remove(key);
                 return Optional.empty();
             }
 

@@ -31,6 +31,8 @@ import org.spongepowered.libs.model.SonatypeResponse;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
@@ -168,9 +170,17 @@ public final class LibraryManager {
 
                 final URL requestUrl = new URI(String.format(LibraryManager.SPONGE_NEXUS_DOWNLOAD_URL,
                     dep.sha512(), dep.group(), dep.module(), dep.version())).toURL();
-                final SonatypeResponse response = this.getResponseFor(this.gson, requestUrl);
+                final SonatypeResponse response;
+                try {
+                    response = this.getResponseFor(this.gson, requestUrl);
+                } catch (final IOException e) {
+                    final StringWriter writer = new StringWriter();
+                    e.printStackTrace(new PrintWriter(writer));
+                    failures.add("Failed to get response from '" + requestUrl + "':\n" + writer);
+                    return null;
+                }
                 if (response.items().isEmpty()) {
-                    failures.add("No data received from '" + requestUrl + "'!");
+                    failures.add("Empty response received from '" + requestUrl + "'!");
                     return null;
                 }
                 // Sort the items based on the preferred repository order

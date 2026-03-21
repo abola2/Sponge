@@ -73,9 +73,16 @@ public abstract class ChunkSerializerMixin_Tracker {
             final T pos = mapEntry.getKey();
             final int ownerUniqueIdIndex = mapEntry.getValue().creatorindex;
             final int notifierUniqueIdIndex = mapEntry.getValue().notifierIndex;
+            if (ownerUniqueIdIndex == -1 && notifierUniqueIdIndex == -1) {
+                continue;
+            }
             final CompoundTag valueNbt = new CompoundTag();
-            valueNbt.putInt("owner", ownerUniqueIdIndex);
-            valueNbt.putInt("notifier", notifierUniqueIdIndex);
+            if (ownerUniqueIdIndex != -1) {
+                valueNbt.putInt("owner", ownerUniqueIdIndex);
+            }
+            if (notifierUniqueIdIndex != -1) {
+                valueNbt.putInt("notifier", notifierUniqueIdIndex);
+            }
             consumer.accept(valueNbt, pos);
             positions.add(valueNbt);
         }

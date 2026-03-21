@@ -104,7 +104,7 @@ public final class DamageEventUtil {
      */
     public static DamageFunction createResistanceModifier(final LivingEntity living) {
         final var effect = living.getEffect(MobEffects.DAMAGE_RESISTANCE);
-        var modifier = DamageEventUtil.buildDamageReductionModifier(DamageModifierTypes.DEFENSIVE_POTION_EFFECT, effect);
+        var modifier = DamageEventUtil.buildDamageReductionModifier(DamageModifierTypes.DEFENSIVE_POTION_EFFECT, effect == null ? living : effect);
         return new DamageFunction(modifier, DamageEventUtil.createResistanceFunction(living));
     }
 

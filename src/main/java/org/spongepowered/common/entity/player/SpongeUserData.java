@@ -182,6 +182,11 @@ public final class SpongeUserData implements Identifiable, DataSerializable, Bed
 
     @Override
     public List<DataHolder> impl$delegateDataHolder() {
+        return Collections.singletonList(this.getDataHolder(false));
+    }
+
+    @Override
+    public List<DataHolder.Mutable> impl$mutableDelegateDataHolder() {
         return Collections.singletonList(this.getDataHolder(true));
     }
 

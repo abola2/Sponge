@@ -40,11 +40,13 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.spongepowered.common.bridge.world.inventory.container.ContainerBridge;
+import org.spongepowered.common.bridge.world.level.chunk.LevelChunkBridge;
 import org.spongepowered.common.event.inventory.InventoryEventFactory;
 import org.spongepowered.common.event.tracking.PhaseContext;
 import org.spongepowered.common.event.tracking.PhaseTracker;
 import org.spongepowered.common.event.tracking.context.transaction.EffectTransactor;
 import org.spongepowered.common.mixin.inventory.event.entity.player.PlayerMixin_Inventory;
+import org.spongepowered.common.util.VecHelper;
 
 import java.util.OptionalInt;
 
@@ -99,7 +101,13 @@ public abstract class ServerPlayerMixin_Shared_Inventory extends PlayerMixin_Inv
         final PhaseContext<?> context = PhaseTracker.SERVER.getPhaseContext();
         try (final EffectTransactor ignored = context.getTransactor().logOpenInventory((ServerPlayer) (Object) this)) {
             final AbstractContainerMenu menu = original.call(menuProvider, containerCounter, inventory, player);
-            context.containerLocation().ifPresent(((ContainerBridge) menu)::bridge$setOpenLocation);
+            context.containerLocation().ifPresent(loc -> {
+                ((ContainerBridge) menu).bridge$setOpenLocation(loc);
+                // Mark the player as notifier for the block they're interacting with
+                final var blockPos = VecHelper.toBlockPos(loc.blockPosition());
+                ((LevelChunkBridge) ((net.minecraft.server.level.ServerLevel) loc.world()).getChunkAt(blockPos))
+                    .bridge$setBlockNotifier(blockPos, player.getUUID());
+            });
             if (!InventoryEventFactory.callInteractContainerOpenEvent((ServerPlayer) (Object) this, menu)) {
                 cir.setReturnValue(OptionalInt.empty());
             }
